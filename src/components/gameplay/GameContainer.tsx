@@ -18,15 +18,13 @@ export const GameContainer: React.FC = () => {
 
   const gameInfo = GAMES_LIST.find((g) => g.id === activeGameId);
 
-  // Play soundtrack music when active game starts
+  // Ensure website background music is turned off during gameplay
   React.useEffect(() => {
-    if (activeGameId && gameInfo) {
-      soundFx.startBgm(gameInfo.category);
-    }
+    soundFx.stopBgm();
     return () => {
       soundFx.stopBgm();
     };
-  }, [activeGameId, gameInfo, isMuted]);
+  }, [activeGameId]);
 
   if (!activeGameId) return null;
 

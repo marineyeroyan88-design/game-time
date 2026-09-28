@@ -448,6 +448,6 @@ const FEATURED_GAMES: GameInfo[] = [
 ];
 
 export const GAMES_LIST: GameInfo[] = [
-  ...FEATURED_GAMES,
-  ...(loadedGamesData as GameInfo[])
+  ...(loadedGamesData as GameInfo[]),
+  ...FEATURED_GAMES
 ];

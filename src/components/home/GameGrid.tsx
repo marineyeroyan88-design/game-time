@@ -103,6 +103,7 @@ const GameCard: React.FC<GameCardProps> = ({ game, onSelect }) => {
 export const GameGrid: React.FC = () => {
   const { selectedCategory, searchQuery, setActiveGameId } = useGame();
   const [visibleCount, setVisibleCount] = React.useState(36);
+  const loadMoreRef = React.useRef<HTMLDivElement | null>(null);
 
   // Reset pagination when category or search changes
   React.useEffect(() => {
@@ -120,6 +121,31 @@ export const GameGrid: React.FC = () => {
   });
 
   const displayedGames = filteredGames.slice(0, visibleCount);
+
+  // Automatic load on scroll using IntersectionObserver
+  React.useEffect(() => {
+    if (visibleCount >= filteredGames.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + 24, filteredGames.length));
+        }
+      },
+      { threshold: 0.1, rootMargin: '300px' }
+    );
+
+    const currentRef = loadMoreRef.current;
+    if (currentRef) {
+      observer.observe(currentRef);
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef);
+      }
+    };
+  }, [visibleCount, filteredGames.length]);
 
   const handleGameSelect = (id: typeof GAMES_LIST[0]['id']) => {
     setActiveGameId(id);
@@ -143,20 +169,15 @@ export const GameGrid: React.FC = () => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
             {displayedGames.map((game) => (
               <GameCard key={game.id} game={game} onSelect={handleGameSelect} />
             ))}
           </div>
 
           {visibleCount < filteredGames.length && (
-            <div className="flex justify-center mt-6">
-              <button
-                onClick={() => setVisibleCount((prev) => prev + 36)}
-                className="bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 hover:border-cyan-500/50 font-bold px-8 py-3 rounded-xl shadow-lg transition transform hover:scale-105 cursor-pointer"
-              >
-                Load More Games ({filteredGames.length - visibleCount} remaining)
-              </button>
+            <div ref={loadMoreRef} className="flex justify-center py-8">
+              <div className="w-7 h-7 border-3 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
             </div>
           )}
         </>
