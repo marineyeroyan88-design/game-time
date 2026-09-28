@@ -1,16 +1,14 @@
 import React from 'react';
-import { Gamepad2, Shield, Heart, Radio } from 'lucide-react';
+import { Shield, Heart, Radio } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
     <footer className="w-full bg-slate-950 border-t border-slate-900 mt-16 py-8 px-6 text-slate-400 text-xs">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-            <Gamepad2 className="w-5 h-5" />
-          </div>
+          <img src="./logo.png" alt="Gamers-Time Logo" className="w-9 h-9 object-contain rounded-lg border border-slate-700/50" />
           <div>
-            <span className="font-bold text-slate-200">GAMETIME ONLINE PLATFORM</span>
+            <span className="font-bold text-slate-200">GAMERS-TIME ONLINE PLATFORM</span>
             <p className="text-[11px] text-slate-400">Play instant multiplayer web games with players around the globe.</p>
           </div>
         </div>

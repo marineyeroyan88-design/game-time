@@ -1,7 +1,7 @@
 import React from 'react';
 import { useGame } from '../../context/GameContext';
 import { soundFx } from '../../utils/audio';
-import { Search, Gamepad2, Volume2, VolumeX, Users, Trophy, Sparkles } from 'lucide-react';
+import { Search, Volume2, VolumeX, Users, Trophy, Sparkles } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const {
@@ -29,14 +29,14 @@ export const Navbar: React.FC = () => {
           onClick={handleLogoClick}
           className="flex items-center gap-2.5 group cursor-pointer text-left focus:outline-none"
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-purple-600 to-pink-500 p-0.5 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition transform">
-            <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-              <Gamepad2 className="w-6 h-6 text-cyan-400 group-hover:rotate-12 transition transform" />
-            </div>
-          </div>
-          <div>
+          <img
+            src="./logo.png"
+            alt="Gamers-Time Logo"
+            className="h-10 w-auto object-contain rounded-xl group-hover:scale-105 transition transform shadow-lg shadow-cyan-500/20 border border-slate-700/50"
+          />
+          <div className="hidden sm:block">
             <div className="text-xl font-extrabold tracking-wider text-white flex items-center gap-1">
-              GAME<span className="text-neon-gradient">TIME</span>
+              GAMERS-<span className="text-neon-gradient">TIME</span>
               <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
             </div>
             <div className="text-[10px] text-cyan-400/80 font-mono tracking-widest uppercase">
