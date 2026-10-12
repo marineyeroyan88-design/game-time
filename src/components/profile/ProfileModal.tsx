@@ -69,46 +69,79 @@ export const ProfileModal: React.FC = () => {
             {/* Custom Avatar Shield Preview */}
             <div className="relative">
               <div
-                className="w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-xl transition transform hover:scale-105"
+                className={`w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-xl transition transform hover:scale-105 ${
+                  userProfile.isOwner ? 'ring-4 ring-amber-400 shadow-amber-500/50 bg-gradient-to-br from-amber-400 via-yellow-500 to-amber-600' : ''
+                }`}
                 style={{ backgroundColor: userProfile.avatar.color }}
               >
                 {userProfile.avatar.badge}
               </div>
-              <div className="absolute -bottom-2 -right-2 bg-slate-950 border border-slate-700 text-cyan-400 font-mono text-[10px] px-2 py-0.5 rounded-full font-bold">
-                Lvl {userProfile.level}
+              <div className={`absolute -bottom-2 -right-2 border text-[10px] px-2 py-0.5 rounded-full font-bold font-mono shadow ${
+                userProfile.isOwner
+                  ? 'bg-amber-950 border-amber-400 text-amber-300'
+                  : 'bg-slate-950 border-slate-700 text-cyan-400'
+              }`}>
+                Lvl {userProfile.level.toLocaleString()}
               </div>
             </div>
 
             {/* User Level & XP info */}
             <div className="flex-1 w-full text-center sm:text-left flex flex-col gap-2">
-              <form onSubmit={handleSaveUsername} className="flex items-center justify-center sm:justify-start gap-2">
-                <input
-                  type="text"
-                  value={usernameInput}
-                  onChange={(e) => setUsernameInput(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 text-base font-bold text-white px-3 py-1 rounded-xl outline-none focus:border-cyan-500 max-w-[200px]"
-                />
-                <button
-                  type="submit"
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                  title="Save Name"
-                >
-                  <Edit3 className="w-4 h-4" />
-                </button>
-              </form>
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                <form onSubmit={handleSaveUsername} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    disabled={userProfile.isOwner}
+                    className={`border text-base font-black px-3 py-1 rounded-xl outline-none max-w-[200px] ${
+                      userProfile.isOwner
+                        ? 'bg-amber-950/40 border-amber-500/50 text-amber-300 cursor-not-allowed'
+                        : 'bg-slate-950 border-slate-800 text-white focus:border-cyan-500'
+                    }`}
+                  />
+                  {!userProfile.isOwner && (
+                    <button
+                      type="submit"
+                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                      title="Save Name"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                  )}
+                </form>
+
+                {userProfile.isOwner && (
+                  <span className="flex items-center gap-1 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 text-xs font-black px-2.5 py-0.5 rounded-full shadow-md">
+                    👑 VERIFIED OWNER
+                  </span>
+                )}
+              </div>
+
+              {userProfile.role && (
+                <div className="text-xs font-semibold text-amber-400/90 flex items-center gap-1 justify-center sm:justify-start">
+                  <span>✦ {userProfile.role}</span>
+                </div>
+              )}
 
               {/* XP Progress Bar */}
               <div className="w-full bg-slate-950 rounded-full h-3 overflow-hidden border border-slate-800 p-0.5">
                 <div
-                  className="bg-gradient-to-r from-cyan-500 to-purple-500 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${xpPercent}%` }}
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    userProfile.isOwner
+                      ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-300'
+                      : 'bg-gradient-to-r from-cyan-500 to-purple-500'
+                  }`}
+                  style={{ width: userProfile.isOwner ? '100%' : `${xpPercent}%` }}
                 />
               </div>
 
               <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                <span>XP Progress</span>
-                <span>
-                  {userProfile.xp} / {userProfile.nextLevelXp} XP ({xpPercent}%)
+                <span>{userProfile.isOwner ? 'MAX POWER LEVEL' : 'XP Progress'}</span>
+                <span className={userProfile.isOwner ? 'text-amber-300 font-bold' : ''}>
+                  {userProfile.isOwner
+                    ? '999,999,999 / 999,999,999 XP (100% MAX)'
+                    : `${userProfile.xp} / ${userProfile.nextLevelXp} XP (${xpPercent}%)`}
                 </span>
               </div>
             </div>

@@ -111,22 +111,45 @@ export const LeaderboardModal: React.FC = () => {
               ))}
 
               {/* Your Personal Rank Row */}
-              <div className="grid grid-cols-12 items-center px-4 py-3 text-xs bg-cyan-950/40 border-t-2 border-cyan-500/40">
-                <div className="col-span-2 font-bold text-cyan-400">#12</div>
+              <div className={`grid grid-cols-12 items-center px-4 py-3 text-xs border-t-2 ${
+                userProfile.isOwner
+                  ? 'bg-amber-950/60 border-amber-500 shadow-inner'
+                  : 'bg-cyan-950/40 border-cyan-500/40'
+              }`}>
+                <div className={`col-span-2 font-black flex items-center gap-1 ${
+                  userProfile.isOwner ? 'text-amber-400' : 'text-cyan-400'
+                }`}>
+                  {userProfile.isOwner ? '👑 #1' : '#12'}
+                </div>
                 <div className="col-span-6 flex items-center gap-2.5">
                   <div
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold"
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shadow ${
+                      userProfile.isOwner ? 'ring-2 ring-amber-400 shadow-amber-500/50' : ''
+                    }`}
                     style={{ backgroundColor: userProfile.avatar.color }}
                   >
                     {userProfile.avatar.badge}
                   </div>
-                  <span className="font-bold text-cyan-300">{userProfile.username} (YOU)</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`font-black ${userProfile.isOwner ? 'text-amber-300' : 'text-cyan-300'}`}>
+                      {userProfile.username} (YOU)
+                    </span>
+                    {userProfile.isOwner && (
+                      <span className="text-[9px] bg-amber-500 text-slate-950 font-black px-1.5 rounded">
+                        OWNER
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="col-span-2 text-center font-mono text-cyan-400">Lvl {userProfile.level}</div>
-                <div className="col-span-2 text-right font-mono font-bold text-yellow-400">
-                  {(
-                    Object.values(userProfile.stats.highScores).reduce((a, b) => a + b, 0) || 12400
-                  ).toLocaleString()}
+                <div className={`col-span-2 text-center font-mono ${
+                  userProfile.isOwner ? 'text-amber-300 font-bold' : 'text-cyan-400'
+                }`}>
+                  Lvl {userProfile.level.toLocaleString()}
+                </div>
+                <div className="col-span-2 text-right font-mono font-black text-amber-400">
+                  {userProfile.isOwner
+                    ? '999,999,999'
+                    : (Object.values(userProfile.stats.highScores).reduce((a, b) => a + b, 0) || 12400).toLocaleString()}
                 </div>
               </div>
             </div>

@@ -27,29 +27,31 @@ interface GameContextType {
 }
 
 const DEFAULT_PROFILE: UserProfile = {
-  username: 'CyberPlayer_' + Math.floor(1000 + Math.random() * 9000),
-  level: 5,
-  xp: 450,
-  nextLevelXp: 1000,
-  coins: 1250,
+  username: 'owner',
+  isOwner: true,
+  role: 'Owner & Supreme Ruler',
+  level: 999999999,
+  xp: 999999999,
+  nextLevelXp: 999999999,
+  coins: 999999999,
   avatar: {
-    helmet: 'cyber-visor',
-    color: '#00f0ff',
-    badge: '⚡',
-    bannerBg: 'from-cyan-900 to-purple-900',
+    helmet: 'neon-crown',
+    color: '#eab308', // Regal Gold
+    badge: '👑', // King
+    bannerBg: 'from-amber-600 via-yellow-500 to-amber-700',
   },
   stats: {
-    gamesPlayed: 24,
-    wins: 9,
+    gamesPlayed: 99999,
+    wins: 99999,
     highScores: {
-      'neon-strike': 4800,
-      'slither-arena': 12400,
-      'pixel-dash': 310,
-      'cyber-hockey': 7,
-      'block-rush': 18500,
+      'neon-strike': 999999,
+      'slither-arena': 999999,
+      'pixel-dash': 999999,
+      'cyber-hockey': 999,
+      'block-rush': 999999,
     },
   },
-  achievements: ['first_win', 'score_10k', 'customizer'],
+  achievements: ['owner_crown', 'first_win', 'score_10k', 'customizer', 'god_mode'],
 };
 
 const INITIAL_QUESTS: DailyQuest[] = [
@@ -100,7 +102,24 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = localStorage.getItem('gametime_user_profile');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Ensure owner privileges and level 999999999 apply
+        if (parsed.username === 'owner' || !parsed.isOwner) {
+          return {
+            ...DEFAULT_PROFILE,
+            ...parsed,
+            username: 'owner',
+            isOwner: true,
+            level: 999999999,
+            role: 'Owner & Supreme Ruler',
+            avatar: {
+              ...DEFAULT_PROFILE.avatar,
+              badge: '👑',
+              color: '#eab308',
+            },
+          };
+        }
+        return parsed;
       } catch {
         return DEFAULT_PROFILE;
       }

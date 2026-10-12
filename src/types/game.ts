@@ -28,6 +28,8 @@ export interface PlayerAvatar {
 
 export interface UserProfile {
   username: string;
+  isOwner?: boolean;
+  role?: string;
   level: number;
   xp: number;
   nextLevelXp: number;

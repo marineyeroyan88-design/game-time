@@ -98,19 +98,36 @@ export const Navbar: React.FC = () => {
               setIsProfileModalOpen(true);
               soundFx.playClick();
             }}
-            className="flex items-center gap-2.5 bg-slate-900 border border-slate-800 hover:border-cyan-500/50 p-1.5 pr-3 rounded-xl transition group"
+            className={`flex items-center gap-2.5 bg-slate-900 border p-1.5 pr-3 rounded-xl transition group ${
+              userProfile.isOwner
+                ? 'border-amber-500/60 shadow-lg shadow-amber-500/20 bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 hover:border-amber-400'
+                : 'border-slate-800 hover:border-cyan-500/50'
+            }`}
           >
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shadow"
-              style={{ backgroundColor: userProfile.avatar.color || '#00f0ff' }}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shadow ${
+                userProfile.isOwner ? 'ring-2 ring-amber-400/80 shadow-amber-500/50' : ''
+              }`}
+              style={{ backgroundColor: userProfile.avatar.color || '#eab308' }}
             >
               {userProfile.avatar.badge}
             </div>
             <div className="hidden sm:flex flex-col text-left">
-              <span className="text-xs font-bold text-slate-200 truncate max-w-[100px] group-hover:text-cyan-400">
-                {userProfile.username}
+              <div className="flex items-center gap-1.5">
+                <span className={`text-xs font-bold truncate max-w-[100px] ${
+                  userProfile.isOwner ? 'text-amber-300 font-extrabold tracking-wide' : 'text-slate-200 group-hover:text-cyan-400'
+                }`}>
+                  {userProfile.username}
+                </span>
+                {userProfile.isOwner && (
+                  <span className="text-[9px] bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black px-1.5 py-0.2 rounded font-mono shadow-sm">
+                    OWNER
+                  </span>
+                )}
+              </div>
+              <span className={`text-[10px] font-mono ${userProfile.isOwner ? 'text-amber-400 font-bold' : 'text-cyan-400'}`}>
+                Lvl {userProfile.level.toLocaleString()}
               </span>
-              <span className="text-[10px] text-cyan-400 font-mono">Lvl {userProfile.level}</span>
             </div>
           </button>
         </div>

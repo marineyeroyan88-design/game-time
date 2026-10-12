@@ -2,7 +2,7 @@ import React from 'react';
 import { useGame } from '../../context/GameContext';
 import type { GameCategory } from '../../types/game';
 import { soundFx } from '../../utils/audio';
-import { Flame, Users, Swords, Gamepad2, Puzzle, Dumbbell, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Flame, Users, Swords, Gamepad2, Puzzle, Dumbbell, Sparkles, Crosshair, Car, Rocket, CheckCircle2 } from 'lucide-react';
 
 interface CategoryItem {
   id: GameCategory;
@@ -12,11 +12,14 @@ interface CategoryItem {
 
 const CATEGORIES: CategoryItem[] = [
   { id: 'All', label: 'All Games', icon: <Sparkles className="w-4 h-4 text-cyan-400" /> },
-  { id: 'Multiplayer', label: 'Multiplayer', icon: <Users className="w-4 h-4 text-purple-400" /> },
+  { id: 'Shooter', label: 'Shooters & Guns', icon: <Crosshair className="w-4 h-4 text-red-400" /> },
+  { id: 'Driving', label: 'Cars & Racing', icon: <Car className="w-4 h-4 text-amber-400" /> },
   { id: 'Action', label: 'Action & Arena', icon: <Swords className="w-4 h-4 text-rose-400" /> },
+  { id: 'Multiplayer', label: 'Multiplayer & Obby', icon: <Users className="w-4 h-4 text-purple-400" /> },
+  { id: 'Simulation', label: 'Simulation & Sandbox', icon: <Rocket className="w-4 h-4 text-cyan-400" /> },
   { id: 'Arcade', label: 'Arcade & Speed', icon: <Gamepad2 className="w-4 h-4 text-emerald-400" /> },
-  { id: 'Puzzle', label: 'Puzzle & Strategy', icon: <Puzzle className="w-4 h-4 text-amber-400" /> },
-  { id: 'Sports', label: 'Sports 1v1', icon: <Dumbbell className="w-4 h-4 text-blue-400" /> },
+  { id: 'Sports', label: 'Sports', icon: <Dumbbell className="w-4 h-4 text-blue-400" /> },
+  { id: 'Puzzle', label: 'Puzzle & Strategy', icon: <Puzzle className="w-4 h-4 text-violet-400" /> },
 ];
 
 export const Sidebar: React.FC = () => {
