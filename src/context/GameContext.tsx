@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { GameId, GameCategory, UserProfile, DailyQuest } from '../types/game';
+import type { GameId, GameCategory, UserProfile, DailyQuest, PageView } from '../types/game';
 import { soundFx } from '../utils/audio';
 
 interface GameContextType {
+  currentPage: PageView;
+  setCurrentPage: (page: PageView) => void;
   activeGameId: GameId | null;
   setActiveGameId: (id: GameId | null) => void;
   selectedCategory: GameCategory;
@@ -90,6 +92,7 @@ const INITIAL_QUESTS: DailyQuest[] = [
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [currentPage, setCurrentPage] = useState<PageView>('home');
   const [activeGameId, setActiveGameId] = useState<GameId | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<GameCategory>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -132,6 +135,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     localStorage.setItem('gametime_user_profile', JSON.stringify(userProfile));
   }, [userProfile]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const hash = window.location.hash;
+      const roomParam = params.get('room') || (hash.includes('room=') ? hash.split('room=')[1]?.split('&')[0] : null);
+      if (roomParam) {
+        setCurrentPage('original-game');
+      }
+    }
+  }, []);
 
   const toggleMute = () => {
     const newMute = !isMuted;
@@ -213,6 +227,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <GameContext.Provider
       value={{
+        currentPage,
+        setCurrentPage,
         activeGameId,
         setActiveGameId,
         selectedCategory,

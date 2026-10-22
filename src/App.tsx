@@ -11,24 +11,53 @@ import { ProfileModal } from './components/profile/ProfileModal';
 import { LeaderboardModal } from './components/profile/LeaderboardModal';
 import { GameContainer } from './components/gameplay/GameContainer';
 
+import { PrivacyPolicyPage } from './components/pages/PrivacyPolicyPage';
+import { AboutUsPage } from './components/pages/AboutUsPage';
+import { ContactUsPage } from './components/pages/ContactUsPage';
+import { TermsAndConditionsPage } from './components/pages/TermsAndConditionsPage';
+import { DisclaimerPage } from './components/pages/DisclaimerPage';
+import { OriginalMultiplayerPage } from './components/pages/OriginalMultiplayerPage';
+
 const MainContent: React.FC = () => {
-  const { activeGameId } = useGame();
+  const { activeGameId, currentPage } = useGame();
+
+  const renderContent = () => {
+    if (activeGameId) {
+      return <GameContainer />;
+    }
+
+    switch (currentPage) {
+      case 'original-game':
+        return <OriginalMultiplayerPage />;
+      case 'privacy-policy':
+        return <PrivacyPolicyPage />;
+      case 'about-us':
+        return <AboutUsPage />;
+      case 'contact-us':
+        return <ContactUsPage />;
+      case 'terms-and-conditions':
+        return <TermsAndConditionsPage />;
+      case 'disclaimer':
+        return <DisclaimerPage />;
+      case 'home':
+      default:
+        return (
+          <>
+            <HeroBanner />
+            <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
+              <Sidebar />
+              <div className="flex-1 w-full">
+                <GameGrid />
+              </div>
+            </div>
+          </>
+        );
+    }
+  };
 
   return (
     <main className="max-w-7xl mx-auto px-4 lg:px-8 py-6 flex-1 flex flex-col gap-8 w-full">
-      {activeGameId ? (
-        <GameContainer />
-      ) : (
-        <>
-          <HeroBanner />
-          <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
-            <Sidebar />
-            <div className="flex-1 w-full">
-              <GameGrid />
-            </div>
-          </div>
-        </>
-      )}
+      {renderContent()}
 
       {/* Modals */}
       <RoomLobbyModal />

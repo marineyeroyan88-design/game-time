@@ -1,10 +1,12 @@
 import React from 'react';
 import { useGame } from '../../context/GameContext';
 import { soundFx } from '../../utils/audio';
-import { Search, Volume2, VolumeX, Users, Trophy, Sparkles } from 'lucide-react';
+import { Search, Volume2, VolumeX, Users, Trophy, Sparkles, Swords } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const {
+    currentPage,
+    setCurrentPage,
     searchQuery,
     setSearchQuery,
     userProfile,
@@ -18,7 +20,14 @@ export const Navbar: React.FC = () => {
 
   const handleLogoClick = () => {
     setActiveGameId(null);
+    setCurrentPage('home');
     soundFx.playClick();
+  };
+
+  const handleOriginalGameClick = () => {
+    setActiveGameId(null);
+    setCurrentPage('original-game');
+    soundFx.playVictory();
   };
 
   return (
@@ -59,6 +68,38 @@ export const Navbar: React.FC = () => {
 
         {/* Action Shortcuts & Profile */}
         <div className="flex items-center gap-2.5">
+          {/* Home Page Link */}
+          <button
+            onClick={() => {
+              setActiveGameId(null);
+              setCurrentPage('home');
+              soundFx.playClick();
+            }}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              currentPage === 'home' && !searchQuery
+                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
+                : 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+            }`}
+          >
+            Home Page
+          </button>
+
+          {/* Original Multiplayer Game Page Link */}
+          <button
+            onClick={handleOriginalGameClick}
+            className={`px-3 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer shadow-md ${
+              currentPage === 'original-game'
+                ? 'bg-gradient-to-r from-cyan-500 to-purple-600 text-slate-950 border border-cyan-300 shadow-cyan-500/30'
+                : 'bg-gradient-to-r from-cyan-500/15 via-purple-500/15 to-pink-500/15 border border-cyan-500/40 text-cyan-300 hover:border-cyan-400 hover:text-white hover:scale-105'
+            }`}
+          >
+            <Swords className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Original Multiplayer</span>
+            <span className="text-[9px] bg-cyan-400 text-slate-950 font-black px-1.5 py-0.2 rounded-full uppercase tracking-tighter animate-pulse">
+              LIVE
+            </span>
+          </button>
+
           {/* Mute Toggle Button */}
           <button
             onClick={toggleMute}

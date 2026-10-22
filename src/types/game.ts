@@ -2,6 +2,8 @@ export type GameId = string;
 
 export type GameCategory = 'All' | 'Multiplayer' | 'Action' | 'Shooter' | 'Driving' | 'Simulation' | 'Arcade' | 'Puzzle' | 'Sports';
 
+export type PageView = 'home' | 'privacy-policy' | 'about-us' | 'contact-us' | 'terms-and-conditions' | 'disclaimer' | 'original-game';
+
 export interface GameInfo {
   id: GameId;
   title: string;

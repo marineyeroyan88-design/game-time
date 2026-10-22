@@ -23,16 +23,38 @@ const CATEGORIES: CategoryItem[] = [
 ];
 
 export const Sidebar: React.FC = () => {
-  const { selectedCategory, setSelectedCategory, setActiveGameId, quests, claimQuestReward } = useGame();
+  const { selectedCategory, setSelectedCategory, setActiveGameId, setCurrentPage, quests, claimQuestReward } = useGame();
 
   const handleCategorySelect = (cat: GameCategory) => {
     setSelectedCategory(cat);
     setActiveGameId(null);
+    setCurrentPage('home');
     soundFx.playClick();
   };
 
   return (
     <aside className="w-full lg:w-64 flex flex-col gap-6 shrink-0">
+      {/* Original Game Feature Card */}
+      <div className="bg-gradient-to-br from-purple-900/40 via-slate-900 to-cyan-950/40 border border-cyan-500/40 rounded-2xl p-4 shadow-xl backdrop-blur relative overflow-hidden group">
+        <div className="flex items-center gap-1.5 text-cyan-400 text-[11px] font-black uppercase tracking-wider mb-1">
+          <Swords className="w-4 h-4 text-cyan-400 animate-pulse" /> Original Online Game
+        </div>
+        <h4 className="text-sm font-black text-white mb-1">Cyber Rivals Arena</h4>
+        <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
+          Play our 100% original real-time multiplayer PvP shooter with live players!
+        </p>
+        <button
+          onClick={() => {
+            setActiveGameId(null);
+            setCurrentPage('original-game');
+            soundFx.playVictory();
+          }}
+          className="w-full bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-slate-950 text-xs font-black py-2 px-3 rounded-xl shadow-lg shadow-cyan-500/20 transition transform hover:scale-[1.02] cursor-pointer"
+        >
+          ⚔️ Play Online Now
+        </button>
+      </div>
+
       {/* Categories Card */}
       <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 backdrop-blur shadow-xl">
         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-3 mb-3 flex items-center gap-1.5">

@@ -2,14 +2,20 @@ import React from 'react';
 import { GAMES_LIST } from '../../data/gamesList';
 import { useGame } from '../../context/GameContext';
 import { soundFx } from '../../utils/audio';
-import { Play, Users, Star, Flame, Zap } from 'lucide-react';
+import { Play, Users, Star, Flame, Zap, Swords } from 'lucide-react';
 
 export const HeroBanner: React.FC = () => {
-  const { setActiveGameId, setIsRoomLobbyOpen } = useGame();
+  const { setActiveGameId, setIsRoomLobbyOpen, setCurrentPage } = useGame();
   const featuredGame = GAMES_LIST.find((g) => g.isFeatured) || GAMES_LIST[0];
 
   const handlePlayNow = () => {
     setActiveGameId(featuredGame.id);
+    soundFx.playVictory();
+  };
+
+  const handlePlayOriginal = () => {
+    setActiveGameId(null);
+    setCurrentPage('original-game');
     soundFx.playVictory();
   };
 
@@ -54,12 +60,19 @@ export const HeroBanner: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 mt-4">
+        <div className="flex flex-wrap items-center gap-3 mt-4">
+          <button
+            onClick={handlePlayOriginal}
+            className="flex items-center gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-extrabold text-sm px-6 py-3 rounded-2xl shadow-xl shadow-purple-600/30 transition transform hover:scale-105 active:scale-95 cursor-pointer border border-white/20"
+          >
+            <Swords className="w-5 h-5 text-cyan-200" /> PLAY ORIGINAL MULTIPLAYER
+          </button>
+
           <button
             onClick={handlePlayNow}
-            className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-extrabold text-sm px-7 py-3 rounded-2xl shadow-xl shadow-cyan-500/30 transition transform hover:scale-105 active:scale-95 cursor-pointer"
+            className="flex items-center gap-2 bg-slate-900/90 hover:bg-slate-800 border border-slate-700 hover:border-cyan-500 text-slate-200 font-bold text-sm px-5 py-3 rounded-2xl transition transform hover:scale-105 active:scale-95 cursor-pointer"
           >
-            <Play className="w-5 h-5 fill-white" /> PLAY NOW
+            <Play className="w-4 h-4 fill-cyan-400 text-cyan-400" /> Play Featured
           </button>
 
           <button
@@ -67,9 +80,9 @@ export const HeroBanner: React.FC = () => {
               setIsRoomLobbyOpen(true);
               soundFx.playClick();
             }}
-            className="flex items-center gap-2 bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-sm px-5 py-3 rounded-2xl transition cursor-pointer"
+            className="flex items-center gap-2 bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 font-bold text-sm px-4 py-3 rounded-2xl transition cursor-pointer"
           >
-            <Users className="w-4 h-4 text-purple-400" /> Create Lobby
+            <Users className="w-4 h-4 text-purple-400" /> Lobbies
           </button>
         </div>
       </div>
