@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Peer, { type DataConnection } from 'peerjs';
 import { useGame } from '../../context/GameContext';
 import { soundFx } from '../../utils/audio';
 import {
@@ -10,7 +11,6 @@ import {
   Trophy,
   MessageSquare,
   Send,
-  RefreshCw,
   Copy,
   Check,
   Radio,
@@ -19,7 +19,10 @@ import {
   Play,
   Share2,
   UserCheck,
-  LogOut
+  LogOut,
+  Globe,
+  Laptop,
+  X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -99,10 +102,9 @@ interface Particle {
   y: number;
   vx: number;
   vy: number;
+  radius: number;
   color: string;
-  size: number;
   alpha: number;
-  life: number;
 }
 
 interface FloatingText {
@@ -148,6 +150,7 @@ interface GameRoomData {
 
 const ARENA_WIDTH = 1200;
 const ARENA_HEIGHT = 700;
+const GITHUB_PAGES_BASE = 'https://marineyeroyan88-design.github.io/game-time';
 
 interface WeaponConfig {
   name: string;
@@ -228,8 +231,9 @@ export const OriginalMultiplayerPage: React.FC = () => {
     }
   ]);
 
-  // Inviting link & toast state
-  const [copiedLink, setCopiedLink] = useState(false);
+  // Inviting link & share modal state
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [copiedKind, setCopiedKind] = useState<'online' | 'local' | 'code' | null>(null);
   const [detectedInviteCode, setDetectedInviteCode] = useState<string | null>(null);
 
   // In-Game match state
@@ -244,9 +248,21 @@ export const OriginalMultiplayerPage: React.FC = () => {
   ]);
   const [screenShake, setScreenShake] = useState(0);
 
-  // Sync channel ref
+  // WebRTC PeerJS & Sync Refs
+  const peerRef = useRef<Peer | null>(null);
+  const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   const syncChannelRef = useRef<BroadcastChannel | null>(null);
   const lastShotTimeRef = useRef(0);
+  const currentRoomRef = useRef<GameRoomData | null>(null);
+  const viewStateRef = useRef<'rooms' | 'lobby' | 'playing'>('rooms');
+
+  useEffect(() => {
+    currentRoomRef.current = currentRoom;
+  }, [currentRoom]);
+
+  useEffect(() => {
+    viewStateRef.current = viewState;
+  }, [viewState]);
 
   // Core Game State ref for 60fps canvas loop
   const stateRef = useRef({
@@ -328,7 +344,124 @@ export const OriginalMultiplayerPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // BroadcastChannel for cross-tab multiplayer sync
+  // Central Broadcast Function (WebRTC DataChannels + BroadcastChannel)
+  const broadcastMessage = (type: string, payload: any) => {
+    // 1. BroadcastChannel (local tabs on same computer)
+    if (syncChannelRef.current) {
+      try {
+        syncChannelRef.current.postMessage({ type, payload });
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. WebRTC DataChannels (across devices, phones, separate computers worldwide)
+    connectionsRef.current.forEach((conn) => {
+      if (conn && conn.open) {
+        try {
+          conn.send({ type, payload });
+        } catch {
+          // ignore
+        }
+      }
+    });
+  };
+
+  // Incoming synchronization message handler
+  const handleIncomingSyncData = (msg: any) => {
+    if (!msg || !msg.type) return;
+    const { type, payload } = msg;
+
+    if (type === 'ROOM_CREATED') {
+      setPublicRooms((prev) => [payload.room, ...prev.filter((r) => r.code !== payload.room.code)]);
+    } else if (type === 'ROOM_UPDATED' || type === 'ROOM_SYNC_STATE') {
+      if (payload.room) {
+        setPublicRooms((prev) => prev.map((r) => (r.code === payload.room.code ? payload.room : r)));
+        if (currentRoomRef.current && currentRoomRef.current.code === payload.room.code) {
+          setCurrentRoom(payload.room);
+        }
+      }
+      if (payload.isPlaying && viewStateRef.current === 'lobby') {
+        soundFx.playVictory();
+        setViewState('playing');
+      }
+    } else if (type === 'GUEST_JOINED') {
+      if (currentRoomRef.current && currentRoomRef.current.code === payload.roomCode) {
+        setCurrentRoom((prev) => {
+          if (!prev) return null;
+          const exists = prev.players.some((p) => p.name === payload.player.name);
+          if (exists) return prev;
+          const updated = { ...prev, players: [...prev.players, payload.player] };
+          currentRoomRef.current = updated;
+          return updated;
+        });
+
+        // Register remote fighter in canvas loop
+        stateRef.current.remotePlayers.set(payload.player.id, {
+          id: payload.player.id,
+          name: payload.player.name,
+          x: 300 + Math.random() * 400,
+          y: 200 + Math.random() * 300,
+          vx: 0,
+          vy: 0,
+          angle: 0,
+          hp: 100,
+          maxHp: 100,
+          shield: 50,
+          maxShield: 100,
+          score: 0,
+          kills: 0,
+          deaths: 0,
+          color: payload.player.color || '#00f0ff',
+          badge: payload.player.badge || '⚡',
+          level: payload.player.level || 1,
+          isBot: false,
+          weapon: 'rifle',
+          ammo: 30,
+          maxAmmo: 30,
+          isReloading: false,
+          reloadTimer: 0,
+          dashCooldown: 0,
+          overdriveTimer: 0,
+          quadDamageTimer: 0
+        });
+
+        // Echo back current state to guest
+        broadcastMessage('ROOM_UPDATED', {
+          room: currentRoomRef.current,
+          isPlaying: viewStateRef.current === 'playing'
+        });
+      }
+    } else if (type === 'ROOM_START_MATCH') {
+      if (currentRoomRef.current && currentRoomRef.current.code === payload.roomCode) {
+        soundFx.playVictory();
+        confetti({ particleCount: 50, spread: 80, origin: { x: 0.5, y: 0.5 } });
+        setViewState('playing');
+      }
+    } else if (type === 'SYNC_PLAYER_STATE') {
+      if (payload.player && payload.player.id !== stateRef.current.localPlayer.id) {
+        stateRef.current.remotePlayers.set(payload.player.id, payload.player);
+      }
+    } else if (type === 'SYNC_PLAYER_SHOOT') {
+      if (payload.ownerId !== stateRef.current.localPlayer.id) {
+        stateRef.current.bullets.push(payload.bullet);
+      }
+    } else if (type === 'SYNC_PLAYER_HIT') {
+      if (payload.targetId === stateRef.current.localPlayer.id) {
+        takeDamage(payload.damage, payload.attackerName, payload.weapon);
+      }
+    } else if (type === 'SYNC_CHAT') {
+      setChatLog((prev) => [...prev.slice(-15), payload]);
+      const remote = stateRef.current.remotePlayers.get(payload.senderId);
+      if (remote) {
+        remote.chatMsg = { text: payload.text, timer: 180 };
+      }
+    } else if (type === 'SYNC_KILL') {
+      addKillEvent(payload.killer, payload.victim, payload.weapon, payload.isKillerOwner, payload.isVictimOwner);
+    }
+  };
+
+  // BroadcastChannel for cross-tab sync
   useEffect(() => {
     let channel: BroadcastChannel | null = null;
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
@@ -336,59 +469,110 @@ export const OriginalMultiplayerPage: React.FC = () => {
       syncChannelRef.current = channel;
 
       channel.onmessage = (event) => {
-        const { type, payload } = event.data;
-        if (!payload) return;
-
-        if (type === 'ROOM_CREATED') {
-          setPublicRooms((prev) => [payload.room, ...prev.filter((r) => r.code !== payload.room.code)]);
-        } else if (type === 'ROOM_UPDATED') {
-          setPublicRooms((prev) => prev.map((r) => (r.code === payload.room.code ? payload.room : r)));
-          if (currentRoom && currentRoom.code === payload.room.code) {
-            setCurrentRoom(payload.room);
-          }
-        } else if (type === 'ROOM_START_MATCH') {
-          if (currentRoom && currentRoom.code === payload.roomCode) {
-            // Launch match for all players in this room!
-            soundFx.playVictory();
-            confetti({ particleCount: 50, spread: 80, origin: { x: 0.5, y: 0.5 } });
-            setViewState('playing');
-          }
-        } else if (type === 'SYNC_PLAYER_STATE') {
-          if (currentRoom && payload.room === currentRoom.code) {
-            if (payload.player.id === stateRef.current.localPlayer.id) return;
-            stateRef.current.remotePlayers.set(payload.player.id, payload.player);
-          }
-        } else if (type === 'SYNC_PLAYER_SHOOT') {
-          if (currentRoom && payload.room === currentRoom.code) {
-            if (payload.ownerId === stateRef.current.localPlayer.id) return;
-            stateRef.current.bullets.push(payload.bullet);
-          }
-        } else if (type === 'SYNC_PLAYER_HIT') {
-          if (currentRoom && payload.room === currentRoom.code) {
-            if (payload.targetId === stateRef.current.localPlayer.id) {
-              takeDamage(payload.damage, payload.attackerName, payload.weapon);
-            }
-          }
-        } else if (type === 'SYNC_CHAT') {
-          if (currentRoom && payload.room === currentRoom.code) {
-            setChatLog((prev) => [...prev.slice(-15), payload]);
-            const remote = stateRef.current.remotePlayers.get(payload.senderId);
-            if (remote) {
-              remote.chatMsg = { text: payload.text, timer: 180 };
-            }
-          }
-        } else if (type === 'SYNC_KILL') {
-          if (currentRoom && payload.room === currentRoom.code) {
-            addKillEvent(payload.killer, payload.victim, payload.weapon, payload.isKillerOwner, payload.isVictimOwner);
-          }
-        }
+        handleIncomingSyncData(event.data);
       };
     }
 
     return () => {
       if (channel) channel.close();
+      if (peerRef.current) peerRef.current.destroy();
+      connectionsRef.current.clear();
     };
-  }, [currentRoom]);
+  }, []);
+
+  // WebRTC Host Peer Initialization
+  const initHostPeer = (code: string) => {
+    try {
+      if (peerRef.current) peerRef.current.destroy();
+      const sanitized = code.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const peer = new Peer(`gt-room-${sanitized}`, {
+        debug: 0,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        }
+      });
+      peerRef.current = peer;
+
+      peer.on('connection', (conn) => {
+        connectionsRef.current.set(conn.peer, conn);
+
+        conn.on('open', () => {
+          conn.send({
+            type: 'ROOM_SYNC_STATE',
+            payload: {
+              room: currentRoomRef.current,
+              isPlaying: viewStateRef.current === 'playing'
+            }
+          });
+        });
+
+        conn.on('data', (data) => {
+          handleIncomingSyncData(data);
+        });
+
+        conn.on('close', () => {
+          connectionsRef.current.delete(conn.peer);
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.log('Host Peer notice:', err);
+      });
+    } catch (err) {
+      console.warn('WebRTC peer error:', err);
+    }
+  };
+
+  // WebRTC Guest Peer Initialization
+  const initGuestPeer = (code: string, myMember: RoomMember) => {
+    try {
+      if (peerRef.current) peerRef.current.destroy();
+      const peer = new Peer({
+        debug: 0,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        }
+      });
+      peerRef.current = peer;
+
+      peer.on('open', () => {
+        const sanitized = code.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const hostPeerId = `gt-room-${sanitized}`;
+        const conn = peer.connect(hostPeerId, { reliable: true });
+        connectionsRef.current.set(hostPeerId, conn);
+
+        conn.on('open', () => {
+          conn.send({
+            type: 'GUEST_JOINED',
+            payload: {
+              roomCode: code,
+              player: myMember
+            }
+          });
+        });
+
+        conn.on('data', (data) => {
+          handleIncomingSyncData(data);
+        });
+
+        conn.on('close', () => {
+          connectionsRef.current.delete(hostPeerId);
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.log('Guest peer notice:', err);
+      });
+    } catch (err) {
+      console.warn('WebRTC guest connect error:', err);
+    }
+  };
 
   // Validate Name before hosting or joining
   const validateAndSaveName = (): boolean => {
@@ -407,20 +591,30 @@ export const OriginalMultiplayerPage: React.FC = () => {
     return true;
   };
 
-  // Generate Invite URL
-  const getInviteUrl = (code: string) => {
-    if (typeof window === 'undefined') return '';
-    return `${window.location.origin}${window.location.pathname}?room=${code}`;
+  // Generate Invite URL (Online GitHub Pages or Localhost)
+  const getInviteUrl = (code: string, mode: 'online' | 'local' = 'online') => {
+    if (typeof window === 'undefined') return `${GITHUB_PAGES_BASE}?room=${code}`;
+    const cleanCode = code.toUpperCase();
+    if (mode === 'online') {
+      return `${GITHUB_PAGES_BASE}?room=${cleanCode}`;
+    }
+    return `${window.location.origin}${window.location.pathname}?room=${cleanCode}`;
   };
 
-  // Copy Invite Link to Clipboard
-  const handleCopyInviteLink = (codeToCopy?: string) => {
-    const code = codeToCopy || currentRoom?.code || 'CYBER-ARENA-1';
-    const link = getInviteUrl(code);
+  // Copy Links
+  const handleCopyLink = (code: string, mode: 'online' | 'local' = 'online') => {
+    const link = getInviteUrl(code, mode);
     navigator.clipboard.writeText(link);
-    setCopiedLink(true);
+    setCopiedKind(mode);
     soundFx.playClick();
-    setTimeout(() => setCopiedLink(false), 2500);
+    setTimeout(() => setCopiedKind(null), 2500);
+  };
+
+  const handleCopyCodeOnly = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedKind('code');
+    soundFx.playClick();
+    setTimeout(() => setCopiedKind(null), 2500);
   };
 
   // Host creates a new room
@@ -471,17 +665,13 @@ export const OriginalMultiplayerPage: React.FC = () => {
     setViewState('lobby');
     soundFx.playVictory();
 
-    // Broadcast room creation
-    if (syncChannelRef.current) {
-      syncChannelRef.current.postMessage({
-        type: 'ROOM_CREATED',
-        payload: { room: newRoom }
-      });
-    }
+    // Start WebRTC Host & Broadcast
+    initHostPeer(generatedCode);
+    broadcastMessage('ROOM_CREATED', { room: newRoom });
   };
 
-  // Guest joins an existing room
-  const handleJoinRoom = (targetCode: string) => {
+  // Guest joins an existing room (Can enter lobby OR jump directly into live match)
+  const handleJoinRoom = (targetCode: string, jumpDirectToMatch = false) => {
     if (!validateAndSaveName()) return;
 
     const guestName = playerNameInput.trim();
@@ -490,14 +680,13 @@ export const OriginalMultiplayerPage: React.FC = () => {
     // Find room in public list or create peer room state
     let target = publicRooms.find((r) => r.code === cleanCode);
     if (!target) {
-      // Connect to custom room code
       target = {
         code: cleanCode,
         name: `Arena [${cleanCode}]`,
         hostId: 'remote-host',
         hostName: 'Room Host',
         maxPlayers: 8,
-        status: 'lobby',
+        status: jumpDirectToMatch ? 'playing' : 'lobby',
         players: []
       };
     }
@@ -517,20 +706,24 @@ export const OriginalMultiplayerPage: React.FC = () => {
     const updatedPlayers = [...target.players.filter((p) => p.name !== guestName), myGuestMember];
     const updatedRoom: GameRoomData = {
       ...target,
+      status: jumpDirectToMatch ? 'playing' : target.status,
       players: updatedPlayers
     };
 
     setCurrentRoom(updatedRoom);
     stateRef.current.localPlayer.isHost = false;
-    setViewState('lobby');
-    soundFx.playClick();
 
-    // Broadcast room update
-    if (syncChannelRef.current) {
-      syncChannelRef.current.postMessage({
-        type: 'ROOM_UPDATED',
-        payload: { room: updatedRoom }
-      });
+    // Connect via WebRTC to Host
+    initGuestPeer(cleanCode, myGuestMember);
+    broadcastMessage('GUEST_JOINED', { roomCode: cleanCode, player: myGuestMember });
+
+    if (jumpDirectToMatch) {
+      soundFx.playVictory();
+      confetti({ particleCount: 50, spread: 70, origin: { x: 0.5, y: 0.5 } });
+      setViewState('playing');
+    } else {
+      setViewState('lobby');
+      soundFx.playClick();
     }
   };
 
@@ -541,18 +734,11 @@ export const OriginalMultiplayerPage: React.FC = () => {
     soundFx.playVictory();
     confetti({ particleCount: 60, spread: 80, origin: { x: 0.5, y: 0.5 } });
 
-    // Broadcast to all connected tabs with this room code
-    if (syncChannelRef.current) {
-      syncChannelRef.current.postMessage({
-        type: 'ROOM_START_MATCH',
-        payload: { roomCode: currentRoom.code }
-      });
-    }
-
+    broadcastMessage('ROOM_START_MATCH', { roomCode: currentRoom.code });
     setViewState('playing');
   };
 
-  // Add / Remove Bot from room lobby
+  // Add Bot to room lobby
   const handleAddBotToLobby = () => {
     if (!currentRoom) return;
     const available = BOT_PRESETS.filter((b) => !currentRoom.players.some((p) => p.name === b.name));
@@ -576,13 +762,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
     };
     setCurrentRoom(updated);
     soundFx.playClick();
-
-    if (syncChannelRef.current) {
-      syncChannelRef.current.postMessage({
-        type: 'ROOM_UPDATED',
-        payload: { room: updated }
-      });
-    }
+    broadcastMessage('ROOM_UPDATED', { room: updated });
   };
 
   // Leave room
@@ -591,9 +771,11 @@ export const OriginalMultiplayerPage: React.FC = () => {
     stateRef.current.localPlayer.isHost = false;
     setViewState('rooms');
     soundFx.playClick();
+    if (peerRef.current) peerRef.current.destroy();
+    connectionsRef.current.clear();
   };
 
-  // Trigger screen shake
+  // Screen shake effect
   const triggerScreenShake = (amount = 8) => {
     setScreenShake(amount);
   };
@@ -647,6 +829,14 @@ export const OriginalMultiplayerPage: React.FC = () => {
       player.deaths += 1;
       soundFx.playDefeat();
       addKillEvent(attackerName, player.name, weaponName, false, player.isOwner);
+      broadcastMessage('SYNC_KILL', {
+        room: currentRoom?.code,
+        killer: attackerName,
+        victim: player.name,
+        weapon: weaponName,
+        isKillerOwner: false,
+        isVictimOwner: player.isOwner
+      });
 
       // Respawn countdown
       setTimeout(() => {
@@ -706,12 +896,10 @@ export const OriginalMultiplayerPage: React.FC = () => {
     player.ammo -= 1;
     soundFx.playShoot();
 
-    const isQuad = player.quadDamageTimer > 0;
-    const dmgMultiplier = (isQuad ? 2 : 1) * (player.isOwner ? 1.25 : 1);
-
-    const spawnBullet = (spreadOffset = 0) => {
-      const finalAngle = player.angle + spreadOffset;
-      const bColor = player.isOwner ? '#fbbf24' : (isQuad ? '#c084fc' : wp.color);
+    const spawnBullet = (spreadAngle = 0) => {
+      const finalAngle = player.angle + spreadAngle;
+      const dmgMultiplier = player.quadDamageTimer > 0 ? 4 : (player.isOwner ? 1.5 : 1);
+      const bColor = player.quadDamageTimer > 0 ? '#a855f7' : (player.isOwner ? '#eab308' : wp.color);
 
       const bullet: Bullet = {
         id: Math.random().toString(),
@@ -732,10 +920,11 @@ export const OriginalMultiplayerPage: React.FC = () => {
 
       stateRef.current.bullets.push(bullet);
 
-      if (syncChannelRef.current && currentRoom) {
-        syncChannelRef.current.postMessage({
-          type: 'SYNC_PLAYER_SHOOT',
-          payload: { room: currentRoom.code, ownerId: player.id, bullet }
+      if (currentRoom) {
+        broadcastMessage('SYNC_PLAYER_SHOOT', {
+          room: currentRoom.code,
+          ownerId: player.id,
+          bullet
         });
       }
     };
@@ -760,36 +949,30 @@ export const OriginalMultiplayerPage: React.FC = () => {
   const startReload = () => {
     const player = stateRef.current.localPlayer;
     if (player.isReloading || player.ammo === player.maxAmmo) return;
-
     player.isReloading = true;
     player.reloadTimer = WEAPONS[player.weapon].reloadTime;
-    addFloatingText('RELOADING...', player.x, player.y - 30, '#94a3b8');
+    soundFx.playPowerup();
+    addFloatingText('RELOADING...', player.x, player.y - 30, '#f59e0b');
   };
 
-  const handleSendChat = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!chatInput.trim() || !currentRoom) return;
 
-    const player = stateRef.current.localPlayer;
     const msg = {
-      sender: player.name,
-      senderId: player.id,
+      sender: userProfile.username,
+      senderId: stateRef.current.localPlayer.id,
       text: chatInput.trim(),
-      isOwner: player.isOwner,
-      isHost: player.isHost
+      isOwner: Boolean(userProfile.isOwner),
+      isHost: Boolean(stateRef.current.localPlayer.isHost)
     };
 
-    player.chatMsg = { text: msg.text, timer: 180 };
     setChatLog((prev) => [...prev.slice(-15), msg]);
+    stateRef.current.localPlayer.chatMsg = { text: msg.text, timer: 180 };
     setChatInput('');
-    setChatOpen(false);
+    soundFx.playClick();
 
-    if (syncChannelRef.current) {
-      syncChannelRef.current.postMessage({
-        type: 'SYNC_CHAT',
-        payload: { room: currentRoom.code, ...msg }
-      });
-    }
+    broadcastMessage('SYNC_CHAT', { room: currentRoom.code, ...msg });
   };
 
   // Keyboard and mouse listener setup for 'playing' mode
@@ -835,25 +1018,23 @@ export const OriginalMultiplayerPage: React.FC = () => {
       if (k === 'a' || k === 'arrowleft') stateRef.current.keys.a = true;
       if (k === 's' || k === 'arrowdown') stateRef.current.keys.s = true;
       if (k === 'd' || k === 'arrowright') stateRef.current.keys.d = true;
-      if (k === ' ' && !chatOpen) {
+      if (k === ' ') {
+        e.preventDefault();
         stateRef.current.keys.space = true;
         executeDash();
       }
-      if (k === 'r' && !chatOpen) startReload();
-      if (k === '1' && !chatOpen) handleSelectWeapon('rifle');
-      if (k === '2' && !chatOpen) handleSelectWeapon('shotgun');
-      if (k === '3' && !chatOpen) handleSelectWeapon('railgun');
-      if (k === '4' && !chatOpen) handleSelectWeapon('rocket');
+      if (k === 'r') startReload();
+      if (k === '1') handleSelectWeapon('rifle');
+      if (k === '2') handleSelectWeapon('shotgun');
+      if (k === '3') handleSelectWeapon('railgun');
+      if (k === '4') handleSelectWeapon('rocket');
       if (k === 'tab') {
         e.preventDefault();
         setScoreboardOpen((prev) => !prev);
       }
-      if (k === 'enter') {
-        if (chatOpen) {
-          handleSendChat();
-        } else {
-          setChatOpen(true);
-        }
+      if (k === 't') {
+        e.preventDefault();
+        setChatOpen((prev) => !prev);
       }
     };
 
@@ -867,12 +1048,10 @@ export const OriginalMultiplayerPage: React.FC = () => {
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
       const scaleX = ARENA_WIDTH / rect.width;
       const scaleY = ARENA_HEIGHT / rect.height;
-
       stateRef.current.mouse.x = (e.clientX - rect.left) * scaleX;
       stateRef.current.mouse.y = (e.clientY - rect.top) * scaleY;
     };
@@ -881,18 +1060,13 @@ export const OriginalMultiplayerPage: React.FC = () => {
       if (e.button === 0) {
         stateRef.current.mouse.isDown = true;
         fireWeapon();
-      } else if (e.button === 2) {
-        e.preventDefault();
-        executeDash();
       }
     };
 
     const handleMouseUp = (e: MouseEvent) => {
-      if (e.button === 0) stateRef.current.mouse.isDown = false;
-    };
-
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
+      if (e.button === 0) {
+        stateRef.current.mouse.isDown = false;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -900,7 +1074,6 @@ export const OriginalMultiplayerPage: React.FC = () => {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
@@ -908,71 +1081,87 @@ export const OriginalMultiplayerPage: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [viewState, chatOpen, currentRoom]);
+  }, [viewState, currentRoom]);
 
-  // Main 60 FPS Canvas Game Loop
+  // Main 60FPS Game Loop for Canvas
   useEffect(() => {
     if (viewState !== 'playing') return;
 
     let animId: number;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const checkObstacleCollision = (nx: number, ny: number, radius: number) => {
-      for (const obs of OBSTACLES) {
-        if (
-          nx + radius > obs.x &&
-          nx - radius < obs.x + obs.w &&
-          ny + radius > obs.y &&
-          ny - radius < obs.y + obs.h
-        ) {
-          return true;
-        }
-      }
-      return false;
-    };
 
     const gameLoop = () => {
+      const cvs = canvasRef.current;
+      if (!cvs) return;
+      const ctx = cvs.getContext('2d');
+      if (!ctx) return;
+
       const player = stateRef.current.localPlayer;
 
-      // 1. Update Player Movement
+      // 1. Update Player Movement & State
       if (player.hp > 0) {
-        const speed = (player.overdriveTimer > 0 ? 5.8 : 4.0) * (player.isOwner ? 1.15 : 1.0);
-        let moveX = 0;
-        let moveY = 0;
-        if (stateRef.current.keys.w) moveY -= 1;
-        if (stateRef.current.keys.s) moveY += 1;
-        if (stateRef.current.keys.a) moveX -= 1;
-        if (stateRef.current.keys.d) moveX += 1;
+        let ax = 0;
+        let ay = 0;
+        const maxSpeed = player.overdriveTimer > 0 ? 6.5 : (player.isOwner ? 6.0 : 4.8);
+        const accel = 0.85;
 
-        if (moveX !== 0 && moveY !== 0) {
-          moveX *= 0.7071;
-          moveY *= 0.7071;
+        if (stateRef.current.keys.w) ay -= accel;
+        if (stateRef.current.keys.s) ay += accel;
+        if (stateRef.current.keys.a) ax -= accel;
+        if (stateRef.current.keys.d) ax += accel;
+
+        if (ax !== 0 && ay !== 0) {
+          ax *= 0.7071;
+          ay *= 0.7071;
         }
 
-        player.vx = player.vx * 0.8 + moveX * speed * 0.2;
-        player.vy = player.vy * 0.8 + moveY * speed * 0.2;
+        player.vx = (player.vx + ax) * 0.88;
+        player.vy = (player.vy + ay) * 0.88;
 
-        const nextX = player.x + player.vx;
-        const nextY = player.y + player.vy;
-
-        if (!checkObstacleCollision(nextX, player.y, 20)) {
-          player.x = Math.max(30, Math.min(ARENA_WIDTH - 30, nextX));
-        }
-        if (!checkObstacleCollision(player.x, nextY, 20)) {
-          player.y = Math.max(30, Math.min(ARENA_HEIGHT - 30, nextY));
+        const speed = Math.hypot(player.vx, player.vy);
+        if (speed > maxSpeed) {
+          player.vx = (player.vx / speed) * maxSpeed;
+          player.vy = (player.vy / speed) * maxSpeed;
         }
 
-        player.angle = Math.atan2(stateRef.current.mouse.y - player.y, stateRef.current.mouse.x - player.x);
+        player.x += player.vx;
+        player.y += player.vy;
 
+        // Arena boundary collision
+        player.x = Math.max(30, Math.min(ARENA_WIDTH - 30, player.x));
+        player.y = Math.max(30, Math.min(ARENA_HEIGHT - 30, player.y));
+
+        // Obstacles collision
+        for (const obs of OBSTACLES) {
+          if (
+            player.x > obs.x - 18 &&
+            player.x < obs.x + obs.w + 18 &&
+            player.y > obs.y - 18 &&
+            player.y < obs.y + obs.h + 18
+          ) {
+            const overlapX = Math.min(player.x - (obs.x - 18), (obs.x + obs.w + 18) - player.x);
+            const overlapY = Math.min(player.y - (obs.y - 18), (obs.y + obs.h + 18) - player.y);
+            if (overlapX < overlapY) {
+              player.x += player.x < obs.x + obs.w / 2 ? -overlapX : overlapX;
+              player.vx = 0;
+            } else {
+              player.y += player.y < obs.y + obs.h / 2 ? -overlapY : overlapY;
+              player.vy = 0;
+            }
+          }
+        }
+
+        // Aim angle towards mouse
+        const dx = stateRef.current.mouse.x - player.x;
+        const dy = stateRef.current.mouse.y - player.y;
+        player.angle = Math.atan2(dy, dx);
+
+        // Continuous fire
         if (stateRef.current.mouse.isDown) {
           fireWeapon();
         }
 
+        // Timers
         if (player.dashCooldown > 0) player.dashCooldown -= 1;
         if (player.overdriveTimer > 0) player.overdriveTimer -= 1;
         if (player.quadDamageTimer > 0) player.quadDamageTimer -= 1;
@@ -990,14 +1179,11 @@ export const OriginalMultiplayerPage: React.FC = () => {
           player.chatMsg.timer -= 1;
         }
 
-        // Broadcast player state across tabs
+        // Broadcast player state across peers and tabs
         const now = Date.now();
-        if (now - stateRef.current.lastSyncTime > 100 && syncChannelRef.current && currentRoom) {
+        if (now - stateRef.current.lastSyncTime > 90 && currentRoom) {
           stateRef.current.lastSyncTime = now;
-          syncChannelRef.current.postMessage({
-            type: 'SYNC_PLAYER_STATE',
-            payload: { room: currentRoom.code, player }
-          });
+          broadcastMessage('SYNC_PLAYER_STATE', { room: currentRoom.code, player });
         }
       }
 
@@ -1018,89 +1204,96 @@ export const OriginalMultiplayerPage: React.FC = () => {
 
         const targets: Player[] = [stateRef.current.localPlayer, ...stateRef.current.bots.filter((b) => b.id !== bot.id)];
         const livingTargets = targets.filter((t) => t.hp > 0);
+        if (livingTargets.length === 0) return;
 
-        if (livingTargets.length > 0) {
-          livingTargets.sort((a, b) => {
-            const da = (a.x - bot.x) ** 2 + (a.y - bot.y) ** 2;
-            const db = (b.x - bot.x) ** 2 + (b.y - bot.y) ** 2;
-            return da - db;
+        let closest = livingTargets[0];
+        let minDist = 999999;
+        for (const t of livingTargets) {
+          const d = Math.hypot(t.x - bot.x, t.y - bot.y);
+          if (d < minDist) {
+            minDist = d;
+            closest = t;
+          }
+        }
+
+        const angleToTarget = Math.atan2(closest.y - bot.y, closest.x - bot.x);
+        bot.angle = angleToTarget;
+
+        const targetDist = 280;
+        const botSpeed = 2.4;
+        if (minDist > targetDist + 40) {
+          bot.vx = Math.cos(angleToTarget) * botSpeed;
+          bot.vy = Math.sin(angleToTarget) * botSpeed;
+        } else if (minDist < targetDist - 40) {
+          bot.vx = -Math.cos(angleToTarget) * botSpeed;
+          bot.vy = -Math.sin(angleToTarget) * botSpeed;
+        } else {
+          bot.vx = Math.cos(angleToTarget + Math.PI / 2) * botSpeed * 0.8;
+          bot.vy = Math.sin(angleToTarget + Math.PI / 2) * botSpeed * 0.8;
+        }
+
+        bot.x += bot.vx;
+        bot.y += bot.vy;
+
+        bot.x = Math.max(30, Math.min(ARENA_WIDTH - 30, bot.x));
+        bot.y = Math.max(30, Math.min(ARENA_HEIGHT - 30, bot.y));
+
+        // Bot Shooting
+        if (Math.random() < 0.04 && minDist < 650) {
+          const spread = (Math.random() - 0.5) * 0.2;
+          const finalAngle = bot.angle + spread;
+          stateRef.current.bullets.push({
+            id: Math.random().toString(),
+            ownerId: bot.id,
+            ownerName: bot.name,
+            isOwnerBullet: false,
+            x: bot.x + Math.cos(bot.angle) * 20,
+            y: bot.y + Math.sin(bot.angle) * 20,
+            vx: Math.cos(finalAngle) * 13,
+            vy: Math.sin(finalAngle) * 13,
+            radius: 3,
+            color: bot.color,
+            damage: 15,
+            range: 700,
+            traveled: 0
           });
-
-          const target = livingTargets[0];
-          const dist = Math.hypot(target.x - bot.x, target.y - bot.y);
-          const desiredAngle = Math.atan2(target.y - bot.y, target.x - bot.x);
-
-          bot.angle = desiredAngle;
-
-          const botSpeed = 2.4;
-          if (dist > 350) {
-            bot.vx = Math.cos(desiredAngle) * botSpeed;
-            bot.vy = Math.sin(desiredAngle) * botSpeed;
-          } else if (dist < 150) {
-            bot.vx = -Math.cos(desiredAngle) * botSpeed;
-            bot.vy = -Math.sin(desiredAngle) * botSpeed;
-          } else {
-            bot.vx = Math.cos(desiredAngle + Math.PI / 2) * botSpeed;
-            bot.vy = Math.sin(desiredAngle + Math.PI / 2) * botSpeed;
-          }
-
-          const nbx = bot.x + bot.vx;
-          const nby = bot.y + bot.vy;
-          if (!checkObstacleCollision(nbx, bot.y, 20)) bot.x = Math.max(30, Math.min(ARENA_WIDTH - 30, nbx));
-          if (!checkObstacleCollision(bot.x, nby, 20)) bot.y = Math.max(30, Math.min(ARENA_HEIGHT - 30, nby));
-
-          if (Math.random() < 0.035 && dist < 500) {
-            const wp = WEAPONS[bot.weapon];
-            const spread = (Math.random() - 0.5) * 0.12;
-            stateRef.current.bullets.push({
-              id: Math.random().toString(),
-              ownerId: bot.id,
-              ownerName: bot.name,
-              isOwnerBullet: false,
-              x: bot.x + Math.cos(bot.angle) * 22,
-              y: bot.y + Math.sin(bot.angle) * 22,
-              vx: Math.cos(bot.angle + spread) * wp.speed,
-              vy: Math.sin(bot.angle + spread) * wp.speed,
-              radius: wp.isRocket ? 6 : 3,
-              color: bot.color,
-              damage: wp.damage * 0.85,
-              range: 800,
-              traveled: 0,
-              isRocket: Boolean(wp.isRocket)
-            });
-          }
         }
       });
 
-      // 3. Update Powerups & Collection
+      // 3. Update PowerUps
       stateRef.current.powerups.forEach((pu) => {
         if (!pu.active) {
-          pu.respawnTime -= 16.6;
-          if (pu.respawnTime <= 0) pu.active = true;
+          pu.respawnTime -= 1;
+          if (pu.respawnTime <= 0) {
+            pu.active = true;
+          }
           return;
         }
 
-        const dist = Math.hypot(pu.x - player.x, pu.y - player.y);
-        if (dist < 35 && player.hp > 0) {
-          pu.active = false;
-          pu.respawnTime = 12000;
-          soundFx.playPowerup();
+        if (player.hp > 0) {
+          const dist = Math.hypot(player.x - pu.x, player.y - pu.y);
+          if (dist < 35) {
+            pu.active = false;
+            pu.respawnTime = 600;
+            soundFx.playPowerup();
 
-          if (pu.type === 'health') {
-            player.hp = Math.min(player.maxHp, player.hp + 40);
-            addFloatingText('+40 HEALTH', player.x, player.y - 30, '#10b981');
-          } else if (pu.type === 'shield') {
-            player.shield = Math.min(player.maxShield, player.shield + 50);
-            addFloatingText('+50 SHIELD', player.x, player.y - 30, '#38bdf8');
-          } else if (pu.type === 'overdrive') {
-            player.overdriveTimer = 480;
-            addFloatingText('⚡ OVERDRIVE READY!', player.x, player.y - 30, '#f59e0b');
-          } else if (pu.type === 'quad') {
-            player.quadDamageTimer = 480;
-            addFloatingText('💥 2X DAMAGE ACTIVE!', player.x, player.y - 30, '#c084fc');
-          } else if (pu.type === 'rocket') {
-            handleSelectWeapon('rocket');
-            addFloatingText('🚀 HAVOC ROCKET ARMED', player.x, player.y - 30, '#ef4444');
+            if (pu.type === 'health') {
+              player.hp = Math.min(player.maxHp, player.hp + 50);
+              addFloatingText('+50 HP', player.x, player.y - 30, '#10b981');
+            } else if (pu.type === 'shield') {
+              player.shield = player.maxShield;
+              addFloatingText('+MAX SHIELD', player.x, player.y - 30, '#3b82f6');
+            } else if (pu.type === 'quad') {
+              player.quadDamageTimer = 450;
+              addFloatingText('QUAD DAMAGE ACTIVE!', player.x, player.y - 30, '#a855f7');
+            } else if (pu.type === 'overdrive') {
+              player.overdriveTimer = 450;
+              addFloatingText('OVERDRIVE SPEED!', player.x, player.y - 30, '#eab308');
+            } else if (pu.type === 'rocket') {
+              handleSelectWeapon('rocket');
+              player.ammo = WEAPONS.rocket.maxAmmo;
+              addFloatingText('HAVOC ROCKET LOADED!', player.x, player.y - 30, '#ef4444');
+            }
           }
         }
       });
@@ -1112,10 +1305,10 @@ export const OriginalMultiplayerPage: React.FC = () => {
         b.y += b.vy;
         b.traveled += Math.hypot(b.vx, b.vy);
 
-        if (b.x < 10 || b.x > ARENA_WIDTH - 10 || b.y < 10 || b.y > ARENA_HEIGHT - 10 || b.traveled >= b.range) {
+        if (b.traveled >= b.range || b.x < 0 || b.x > ARENA_WIDTH || b.y < 0 || b.y > ARENA_HEIGHT) {
           if (b.isRocket) {
             stateRef.current.explosions.push({ x: b.x, y: b.y, radius: 5, maxRadius: 55, color: '#f97316', alpha: 1 });
-            triggerScreenShake(7);
+            triggerScreenShake(6);
           }
           return;
         }
@@ -1135,6 +1328,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
           return;
         }
 
+        // Check collision against local player
         if (b.ownerId !== player.id && player.hp > 0) {
           const dist = Math.hypot(b.x - player.x, b.y - player.y);
           if (dist < 22) {
@@ -1143,6 +1337,33 @@ export const OriginalMultiplayerPage: React.FC = () => {
           }
         }
 
+        // Check collision against remote players
+        let hitRemote = false;
+        for (const [rpId, rp] of stateRef.current.remotePlayers.entries()) {
+          if (b.ownerId === rpId || rp.hp <= 0) continue;
+          const dist = Math.hypot(b.x - rp.x, b.y - rp.y);
+          if (dist < 22) {
+            hitRemote = true;
+            broadcastMessage('SYNC_PLAYER_HIT', {
+              room: currentRoom?.code,
+              targetId: rpId,
+              damage: b.damage,
+              attackerName: player.name,
+              weapon: player.weapon
+            });
+            addFloatingText(`-${Math.round(b.damage)}`, rp.x, rp.y - 25, '#f59e0b');
+            break;
+          }
+        }
+        if (hitRemote) {
+          if (b.isRocket) {
+            stateRef.current.explosions.push({ x: b.x, y: b.y, radius: 5, maxRadius: 55, color: '#f97316', alpha: 1 });
+            triggerScreenShake(7);
+          }
+          return;
+        }
+
+        // Check collision against bots
         let hitBot = false;
         for (const bot of stateRef.current.bots) {
           if (b.ownerId === bot.id || bot.hp <= 0) continue;
@@ -1208,151 +1429,135 @@ export const OriginalMultiplayerPage: React.FC = () => {
       // 7. Update Floating Text
       stateRef.current.floatingTexts.forEach((ft) => {
         ft.y += ft.vy;
-        ft.alpha -= 0.025;
+        ft.alpha -= 0.02;
       });
       stateRef.current.floatingTexts = stateRef.current.floatingTexts.filter((ft) => ft.alpha > 0);
 
-      // 8. RENDER CANVAS
+      // ================= DRAW ARENA =================
       ctx.save();
 
+      // Screen shake
       if (screenShake > 0) {
-        const sx = (Math.random() - 0.5) * screenShake;
-        const sy = (Math.random() - 0.5) * screenShake;
-        ctx.translate(sx, sy);
-        setScreenShake((prev) => Math.max(0, prev - 0.6));
+        ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake);
+        setScreenShake((prev) => Math.max(0, prev - 0.7));
       }
 
-      ctx.fillStyle = '#06070a';
+      // Background grid
+      ctx.fillStyle = '#090d16';
       ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
-      ctx.strokeStyle = '#0f172a';
+      ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
       ctx.lineWidth = 1;
-      for (let x = 0; x < ARENA_WIDTH; x += 50) {
+      const gridSize = 40;
+      for (let x = 0; x < ARENA_WIDTH; x += gridSize) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, ARENA_HEIGHT);
         ctx.stroke();
       }
-      for (let y = 0; y < ARENA_HEIGHT; y += 50) {
+      for (let y = 0; y < ARENA_HEIGHT; y += gridSize) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(ARENA_WIDTH, y);
         ctx.stroke();
       }
 
-      ctx.strokeStyle = '#00f0ff44';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(4, 4, ARENA_WIDTH - 8, ARENA_HEIGHT - 8);
-
-      OBSTACLES.forEach((obs) => {
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-        ctx.strokeStyle = '#38bdf866';
+      // Obstacles
+      for (const obs of OBSTACLES) {
+        const grad = ctx.createLinearGradient(obs.x, obs.y, obs.x + obs.w, obs.y + obs.h);
+        grad.addColorStop(0, '#1e293b');
+        grad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = grad;
+        ctx.strokeStyle = '#38bdf8';
         ctx.lineWidth = 2;
-        ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
-
-        ctx.fillStyle = '#0284c7';
-        ctx.fillRect(obs.x + 8, obs.y + 8, obs.w - 16, 4);
-        ctx.fillRect(obs.x + 8, obs.y + obs.h - 12, obs.w - 16, 4);
-      });
-
-      stateRef.current.powerups.forEach((pu) => {
-        ctx.save();
         ctx.beginPath();
-        ctx.arc(pu.x, pu.y, 22, 0, Math.PI * 2);
-        ctx.fillStyle = pu.active ? `${pu.color}22` : '#1e293b22';
+        ctx.roundRect(obs.x, obs.y, obs.w, obs.h, 12);
         ctx.fill();
-        ctx.strokeStyle = pu.active ? pu.color : '#475569';
-        ctx.lineWidth = 2;
         ctx.stroke();
 
-        if (pu.active) {
-          ctx.font = '16px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(pu.icon, pu.x, pu.y);
-        } else {
-          ctx.fillStyle = '#64748b';
-          ctx.font = '10px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(`${Math.ceil(pu.respawnTime / 1000)}s`, pu.x, pu.y + 3);
-        }
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.05)';
+        ctx.beginPath();
+        ctx.roundRect(obs.x + 8, obs.y + 8, obs.w - 16, obs.h - 16, 6);
+        ctx.fill();
+      }
+
+      // Powerups
+      stateRef.current.powerups.forEach((pu) => {
+        if (!pu.active) return;
+        ctx.save();
+        ctx.fillStyle = pu.color;
+        ctx.shadowColor = pu.color;
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(pu.x, pu.y, 16, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pu.icon, pu.x, pu.y);
         ctx.restore();
       });
 
+      // Bullets
       stateRef.current.bullets.forEach((b) => {
         ctx.save();
+        ctx.fillStyle = b.color;
         ctx.shadowColor = b.color;
         ctx.shadowBlur = b.isRocket ? 14 : 8;
-        ctx.fillStyle = b.color;
         ctx.beginPath();
         ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
         ctx.fill();
-
-        ctx.strokeStyle = `${b.color}66`;
-        ctx.lineWidth = b.radius;
-        ctx.beginPath();
-        ctx.moveTo(b.x, b.y);
-        ctx.lineTo(b.x - b.vx * 1.5, b.y - b.vy * 1.5);
-        ctx.stroke();
         ctx.restore();
       });
 
+      // Explosions
       stateRef.current.explosions.forEach((exp) => {
         ctx.save();
+        ctx.strokeStyle = exp.color;
+        ctx.globalAlpha = exp.alpha;
+        ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.arc(exp.x, exp.y, exp.radius, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(249, 115, 22, ${exp.alpha * 0.4})`;
-        ctx.fill();
-        ctx.strokeStyle = `rgba(254, 215, 170, ${exp.alpha})`;
-        ctx.lineWidth = 3;
         ctx.stroke();
         ctx.restore();
       });
 
-      stateRef.current.particles.forEach((p) => {
-        ctx.save();
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = p.alpha;
-        ctx.fillRect(p.x, p.y, p.size, p.size);
-        ctx.restore();
-      });
-
+      // Render Fighters (Bots, Remote, Local)
       const renderFighter = (f: Player, isLocal: boolean) => {
         if (f.hp <= 0) return;
 
         ctx.save();
         ctx.translate(f.x, f.y);
+        ctx.rotate(f.angle);
+
+        // Body
+        ctx.fillStyle = f.color;
+        ctx.shadowColor = f.isOwner ? '#eab308' : f.color;
+        ctx.shadowBlur = f.isOwner ? 20 : (isLocal ? 12 : 6);
+        ctx.beginPath();
+        ctx.arc(0, 0, 18, 0, Math.PI * 2);
+        ctx.fill();
 
         if (f.isOwner) {
-          ctx.beginPath();
-          ctx.arc(0, 0, 32, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(234, 179, 8, 0.18)';
-          ctx.fill();
-          ctx.strokeStyle = '#eab30888';
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#fde047';
+          ctx.lineWidth = 3;
           ctx.stroke();
         }
 
-        ctx.rotate(f.angle);
-        ctx.fillStyle = f.isOwner ? '#fbbf24' : '#64748b';
-        ctx.fillRect(14, -4, 18, 8);
+        // Weapon Barrel
+        ctx.fillStyle = '#64748b';
+        ctx.fillRect(10, -3.5, 16, 7);
 
-        ctx.beginPath();
-        ctx.arc(0, 0, 18, 0, Math.PI * 2);
-        ctx.fillStyle = f.color;
-        ctx.fill();
-        ctx.strokeStyle = f.isOwner ? '#fef08a' : (f.isHost ? '#f59e0b' : '#ffffff');
-        ctx.lineWidth = f.isOwner ? 3 : 2;
-        ctx.stroke();
-
-        ctx.fillStyle = '#0f172a';
+        // Visor / Hands
+        ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(6, 0, 6, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore();
 
+        // HUD overhead
         ctx.save();
         ctx.translate(f.x, f.y);
 
@@ -1416,6 +1621,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
       stateRef.current.remotePlayers.forEach((rp) => renderFighter(rp, false));
       renderFighter(player, true);
 
+      // Floating damage numbers
       stateRef.current.floatingTexts.forEach((ft) => {
         ctx.save();
         ctx.font = 'bold 12px monospace';
@@ -1426,6 +1632,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
         ctx.restore();
       });
 
+      // Aim Line for local player
       if (player.hp > 0) {
         ctx.save();
         ctx.strokeStyle = player.isOwner ? 'rgba(234, 179, 8, 0.3)' : 'rgba(0, 240, 255, 0.25)';
@@ -1469,30 +1676,72 @@ export const OriginalMultiplayerPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Invited banner notification if user came from a share link */}
+        {/* Invited banner notification if user opened an invite link (?room=CODE) */}
         {detectedInviteCode && (
-          <div className="bg-gradient-to-r from-purple-900/60 via-slate-900 to-cyan-950/60 border-2 border-cyan-400/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl shadow-cyan-500/10">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 font-bold text-lg">
-                🎉
+          <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-cyan-950/80 border-2 border-cyan-400 rounded-3xl p-6 flex flex-col gap-4 shadow-2xl shadow-cyan-500/20">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 font-bold text-2xl shadow-lg">
+                  🎮
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold bg-cyan-400 text-slate-950 px-2 py-0.5 rounded uppercase">
+                      INVITATION
+                    </span>
+                    <h3 className="text-base font-black text-white">
+                      You're Invited to Play in Room <span className="text-cyan-400 font-mono tracking-wider">{detectedInviteCode}</span>!
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1">
+                    Choose your player name and jump straight into the arena battle!
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-extrabold text-white">Room Invitation Detected!</h4>
-                <p className="text-xs text-slate-300">
-                  You've been invited to join Room <strong className="text-cyan-400 font-mono">{detectedInviteCode}</strong>. Confirm your name below and jump straight in!
-                </p>
+
+              {/* Direct Instant Action Buttons */}
+              <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                <button
+                  onClick={() => handleJoinRoom(detectedInviteCode, true)}
+                  className="flex-1 sm:flex-none bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xs px-5 py-3 rounded-xl transition cursor-pointer shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-1.5 transform hover:scale-105"
+                >
+                  <Play className="w-4 h-4 fill-slate-950" /> ⚡ PLAY NOW (JUMP IN)
+                </button>
+                <button
+                  onClick={() => handleJoinRoom(detectedInviteCode, false)}
+                  className="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-4 py-3 rounded-xl border border-slate-700 transition cursor-pointer"
+                >
+                  Enter Lobby
+                </button>
               </div>
             </div>
-            <button
-              onClick={() => handleJoinRoom(detectedInviteCode)}
-              className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl transition cursor-pointer shrink-0 shadow-lg"
-            >
-              Join Invited Room
-            </button>
+
+            {/* Quick in-banner Name Entry */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
+              <span className="text-xs font-bold text-slate-400 whitespace-nowrap flex items-center gap-1">
+                <UserCheck className="w-3.5 h-3.5 text-cyan-400" /> Player Name:
+              </span>
+              <input
+                type="text"
+                value={playerNameInput}
+                onChange={(e) => {
+                  setPlayerNameInput(e.target.value);
+                  setNameError('');
+                }}
+                placeholder="Enter your name..."
+                className="flex-1 bg-slate-900 border border-slate-700 focus:border-cyan-400 text-xs font-bold text-white px-3 py-2 rounded-xl outline-none"
+              />
+              <button
+                onClick={() => validateAndSaveName() && soundFx.playClick()}
+                className="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold px-3 py-2 rounded-xl transition cursor-pointer"
+              >
+                Save Name
+              </button>
+            </div>
           </div>
         )}
 
-        {/* MANDATORY STEP: Gamer Name Setup Card */}
+        {/* Gamer Name Setup Card */}
         <div className="bg-slate-900/90 border border-cyan-500/40 rounded-3xl p-6 backdrop-blur shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
@@ -1555,7 +1804,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
               <Crown className="w-5 h-5 text-amber-400" /> Host a New Room
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Create a custom match room where you are the <strong className="text-amber-300">👑 HOST</strong>. You control when the match begins, can invite friends via link, and configure room settings.
+              Create a custom match room where you are the <strong className="text-amber-300">👑 HOST</strong>. You get a shareable link that works across any phone or computer worldwide!
             </p>
 
             <form onSubmit={handleHostRoom} className="flex flex-col gap-3 mt-2">
@@ -1605,12 +1854,12 @@ export const OriginalMultiplayerPage: React.FC = () => {
               <Zap className="w-5 h-5 text-cyan-400" /> Join Room by Code
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Have a room code sent by a friend or host? Enter the room code below to join their lobby immediately.
+              Have a 6-character room code sent by a friend or host? Enter it below to join the match instantly from any device.
             </p>
 
             <div className="flex flex-col gap-3 mt-2">
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">Enter 6-Digit Room Code</label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Enter Room Code</label>
                 <input
                   type="text"
                   value={joinCodeInput}
@@ -1620,13 +1869,23 @@ export const OriginalMultiplayerPage: React.FC = () => {
                 />
               </div>
 
-              <button
-                onClick={() => joinCodeInput.trim() && handleJoinRoom(joinCodeInput.trim())}
-                disabled={!joinCodeInput.trim()}
-                className="mt-4 w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 text-slate-950 font-black text-xs py-3 rounded-xl shadow-lg shadow-cyan-500/20 transition transform hover:scale-[1.01] cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Play className="w-4 h-4 fill-slate-950" /> JOIN ROOM NOW
-              </button>
+              <div className="grid grid-cols-2 gap-3 mt-2">
+                <button
+                  onClick={() => joinCodeInput.trim() && handleJoinRoom(joinCodeInput.trim(), true)}
+                  disabled={!joinCodeInput.trim()}
+                  className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 disabled:opacity-50 text-slate-950 font-black text-xs py-3 rounded-xl shadow-lg shadow-emerald-500/20 transition cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Play className="w-4 h-4 fill-slate-950" /> ⚡ PLAY NOW
+                </button>
+
+                <button
+                  onClick={() => joinCodeInput.trim() && handleJoinRoom(joinCodeInput.trim(), false)}
+                  disabled={!joinCodeInput.trim()}
+                  className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-cyan-300 font-bold text-xs py-3 rounded-xl border border-slate-700 transition cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Users className="w-4 h-4" /> Enter Lobby
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1637,7 +1896,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
             <h3 className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wider">
               <Users className="w-4 h-4 text-purple-400" /> Live Public Rooms ({publicRooms.length})
             </h3>
-            <span className="text-xs text-slate-400">Click any room to join as a player</span>
+            <span className="text-xs text-slate-400">Join any room directly to play</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1664,17 +1923,20 @@ export const OriginalMultiplayerPage: React.FC = () => {
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleCopyInviteLink(room.code)}
-                    className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 transition"
-                    title="Copy Invite Link"
+                    onClick={() => {
+                      handleCopyLink(room.code, 'online');
+                      setShareModalOpen(true);
+                    }}
+                    className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 transition cursor-pointer"
+                    title="Share Room Invite"
                   >
                     <Share2 className="w-3.5 h-3.5 text-cyan-400" />
                   </button>
                   <button
-                    onClick={() => handleJoinRoom(room.code)}
-                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                    onClick={() => handleJoinRoom(room.code, true)}
+                    className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shadow"
                   >
-                    Join Room
+                    Play
                   </button>
                 </div>
               </div>
@@ -1710,14 +1972,17 @@ export const OriginalMultiplayerPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Copy Invite Link & Leave */}
+          {/* Share Room Button & Leave */}
           <div className="flex items-center gap-3">
             <button
-              onClick={() => handleCopyInviteLink(currentRoom.code)}
-              className="flex items-center gap-2 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 hover:from-cyan-500/30 hover:to-purple-500/30 border border-cyan-400/60 text-cyan-300 font-black text-xs px-4 py-2.5 rounded-xl shadow-lg transition cursor-pointer"
+              onClick={() => {
+                handleCopyLink(currentRoom.code, 'online');
+                setShareModalOpen(true);
+              }}
+              className="flex items-center gap-2 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:opacity-90 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl shadow-lg transition cursor-pointer"
             >
-              {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-cyan-400" />}
-              <span>{copiedLink ? 'Invite Link Copied!' : 'Copy Invite Link'}</span>
+              <Share2 className="w-4 h-4 text-slate-950" />
+              <span>Share Invite Link</span>
             </button>
 
             <button
@@ -1788,7 +2053,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
               ))}
             </div>
 
-            {/* Launch Action Button */}
+            {/* Launch Action Button: Host starts for all, or Guest can jump straight in */}
             <div className="border-t border-slate-800 pt-4 mt-2">
               {isHost ? (
                 <button
@@ -1798,9 +2063,20 @@ export const OriginalMultiplayerPage: React.FC = () => {
                   <Play className="w-5 h-5 fill-slate-950" /> START ARENA MATCH (FOR ALL PLAYERS)
                 </button>
               ) : (
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
-                  <span>Waiting for host <strong className="text-amber-300">{currentRoom.hostName}</strong> to start the match...</span>
+                <div className="flex flex-col gap-3">
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                    <span>Host <strong className="text-amber-300">{currentRoom.hostName}</strong> is setting up. You can wait or enter now!</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      soundFx.playVictory();
+                      setViewState('playing');
+                    }}
+                    className="w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-slate-950 font-black text-sm py-3.5 rounded-2xl shadow-xl shadow-cyan-500/20 transition transform hover:scale-[1.01] cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Play className="w-5 h-5 fill-slate-950" /> ⚡ JUMP INTO ARENA NOW (INSTANT PLAY)
+                  </button>
                 </div>
               )}
             </div>
@@ -1841,6 +2117,106 @@ export const OriginalMultiplayerPage: React.FC = () => {
             </form>
           </div>
         </div>
+
+        {/* Share Room Modal */}
+        {shareModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="relative w-full max-w-lg bg-slate-950 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col gap-5">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400">
+                    <Share2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Share Room & Play Together</h3>
+                    <p className="text-xs text-slate-400">Send this link to friends on any phone, PC, or tablet</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShareModalOpen(false)}
+                  className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Room Code Badge */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Room Code</span>
+                  <span className="text-lg font-mono font-black text-cyan-400">{currentRoom.code}</span>
+                </div>
+                <button
+                  onClick={() => handleCopyCodeOnly(currentRoom.code)}
+                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3.5 py-2 rounded-xl transition cursor-pointer"
+                >
+                  {copiedKind === 'code' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKind === 'code' ? 'Code Copied!' : 'Copy Code'}</span>
+                </button>
+              </div>
+
+              {/* Option 1: Online Public Link (Worldwide - Any Computer/Phone) */}
+              <div className="bg-gradient-to-r from-purple-950/40 to-slate-900 border border-purple-500/40 rounded-2xl p-4 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-purple-400" /> Online Link (Recommended for Friends)
+                  </span>
+                  <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-mono">
+                    Any Device / Worldwide
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Send this link on Discord, WhatsApp, or SMS. Your friend can open it on their phone, laptop, or PC and join right away!
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={getInviteUrl(currentRoom.code, 'online')}
+                    className="flex-1 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 px-3 py-2 rounded-xl font-mono truncate"
+                  />
+                  <button
+                    onClick={() => handleCopyLink(currentRoom.code, 'online')}
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shrink-0 flex items-center gap-1"
+                  >
+                    {copiedKind === 'online' ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKind === 'online' ? 'Copied!' : 'Copy Online Link'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 2: Localhost Link (For testing on this computer) */}
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Laptop className="w-4 h-4 text-cyan-400" /> Local Link (Same Machine Testing)
+                  </span>
+                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">
+                    This PC Only
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Use this link if opening a second window/tab on this exact same computer.
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={getInviteUrl(currentRoom.code, 'local')}
+                    className="flex-1 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 px-3 py-2 rounded-xl font-mono truncate"
+                  />
+                  <button
+                    onClick={() => handleCopyLink(currentRoom.code, 'local')}
+                    className="bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shrink-0 flex items-center gap-1"
+                  >
+                    {copiedKind === 'local' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKind === 'local' ? 'Copied!' : 'Copy Local'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1880,17 +2256,20 @@ export const OriginalMultiplayerPage: React.FC = () => {
           </div>
 
           <button
-            onClick={() => handleCopyInviteLink(currentRoom?.code)}
+            onClick={() => {
+              handleCopyLink(currentRoom?.code || 'CYBER-1', 'online');
+              setShareModalOpen(true);
+            }}
             className="flex items-center gap-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-black px-3 py-2 rounded-xl transition cursor-pointer shadow-md"
             title="Share Room Invite Link"
           >
-            {copiedLink ? <Check className="w-3.5 h-3.5 text-slate-950" /> : <Copy className="w-3.5 h-3.5 text-slate-950" />}
-            <span>{copiedLink ? 'Copied Link!' : 'Copy Invite Link'}</span>
+            <Share2 className="w-3.5 h-3.5 text-slate-950" />
+            <span>Invite Friends</span>
           </button>
 
           <button
             onClick={toggleMute}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition"
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition cursor-pointer"
           >
             {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
           </button>
@@ -1905,7 +2284,7 @@ export const OriginalMultiplayerPage: React.FC = () => {
         {/* Live HUD Header Overlay */}
         <div className="absolute top-4 left-4 right-4 z-20 flex items-start justify-between pointer-events-none">
           {/* Player Vitals HUD */}
-          <div className="flex flex-col gap-2 bg-slate-950/80 backdrop-blur-md p-3.5 rounded-2xl border border-slate-850 shadow-xl pointer-events-auto min-w-[200px]">
+          <div className="flex flex-col gap-2 bg-slate-950/80 backdrop-blur-md p-3.5 rounded-2xl border border-slate-800 shadow-xl pointer-events-auto min-w-[200px]">
             <div className="flex items-center justify-between text-xs font-bold">
               <span className={userProfile.isOwner ? 'text-amber-300 font-black flex items-center gap-1' : 'text-cyan-400'}>
                 {userProfile.isOwner && '👑'} {stateRef.current.localPlayer.name}
@@ -1918,135 +2297,115 @@ export const OriginalMultiplayerPage: React.FC = () => {
             {/* Health Bar */}
             <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800">
               <div
-                className={`h-full transition-all duration-200 ${
-                  userProfile.isOwner
-                    ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
-                    : 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                }`}
-                style={{ width: `${Math.max(0, (stateRef.current.localPlayer.hp / 100) * 100)}%` }}
+                className={`h-full transition-all duration-150 ${userProfile.isOwner ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                style={{ width: `${(stateRef.current.localPlayer.hp / stateRef.current.localPlayer.maxHp) * 100}%` }}
               />
             </div>
 
             {/* Shield Bar */}
-            <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+            <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden border border-slate-800">
               <div
-                className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-200"
-                style={{ width: `${Math.max(0, (stateRef.current.localPlayer.shield / 100) * 100)}%` }}
+                className="h-full bg-cyan-400 transition-all duration-150"
+                style={{ width: `${(stateRef.current.localPlayer.shield / stateRef.current.localPlayer.maxShield) * 100}%` }}
               />
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mt-0.5">
-              <span>HP: {Math.max(0, Math.round(stateRef.current.localPlayer.hp))}</span>
-              <span>SHIELD: {Math.round(stateRef.current.localPlayer.shield)}</span>
             </div>
           </div>
 
-          {/* Killfeed Banner */}
-          <div className="flex flex-col gap-1.5 max-w-xs items-end pointer-events-none">
+          {/* Kill Feed Overlay */}
+          <div className="flex flex-col gap-1.5 items-end pointer-events-auto">
             {killFeed.map((kf) => (
               <div
                 key={kf.id}
-                className="bg-slate-950/80 backdrop-blur border border-slate-800 text-[11px] px-3 py-1 rounded-xl shadow-lg flex items-center gap-1.5 animate-fade-in"
+                className="bg-slate-950/85 border border-slate-800/80 text-xs px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-2 animate-fade-in"
               >
-                <span className={kf.isKillerOwner ? 'text-amber-400 font-bold' : 'text-cyan-400 font-semibold'}>
-                  {kf.isKillerOwner && '👑 '} {kf.killer}
+                <span className={kf.isKillerOwner ? 'text-amber-300 font-bold' : 'text-cyan-400 font-bold'}>
+                  {kf.isKillerOwner && '👑 '}
+                  {kf.killer}
                 </span>
-                <span className="text-slate-500 text-[9px] uppercase font-mono px-1 bg-slate-900 rounded">
-                  {kf.weapon}
-                </span>
-                <span className={kf.isVictimOwner ? 'text-amber-400 font-bold' : 'text-slate-300'}>
-                  {kf.isVictimOwner && '👑 '} {kf.victim}
+                <span className="text-slate-500 text-[10px]">[{kf.weapon}]</span>
+                <span className={kf.isVictimOwner ? 'text-amber-300 font-bold' : 'text-rose-400 font-bold'}>
+                  {kf.isVictimOwner && '👑 '}
+                  {kf.victim}
                 </span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Live Canvas Viewport */}
+        {/* The 60FPS Canvas */}
         <canvas
           ref={canvasRef}
           width={ARENA_WIDTH}
           height={ARENA_HEIGHT}
-          className="w-full aspect-[12/7] max-h-[640px] object-contain cursor-crosshair relative z-10"
+          className="w-full h-auto max-h-[72vh] object-contain cursor-crosshair block"
         />
 
-        {/* Weapon Selection Deck Bar */}
-        <div className="w-full bg-slate-900/95 border-t border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-4 z-20">
+        {/* Weapons Hotbar & Controls Footer */}
+        <div className="w-full bg-slate-950/90 border-t border-slate-800 px-6 py-3 flex flex-wrap items-center justify-between gap-4 z-20">
+          {/* Weapon Selector */}
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-400 hidden sm:inline">Loadout:</span>
-            {(['rifle', 'shotgun', 'railgun', 'rocket'] as const).map((w, idx) => {
-              const wp = WEAPONS[w];
-              const isSelected = selectedWeapon === w;
-              return (
-                <button
-                  key={w}
-                  onClick={() => handleSelectWeapon(w)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                    isSelected
-                      ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-md shadow-cyan-500/20'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="text-[10px] bg-slate-800 text-slate-400 font-mono px-1 rounded">{idx + 1}</span>
-                  <span>{wp.name}</span>
-                </button>
-              );
-            })}
+            {(['rifle', 'shotgun', 'railgun', 'rocket'] as const).map((w, idx) => (
+              <button
+                key={w}
+                onClick={() => handleSelectWeapon(w)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                  selectedWeapon === w
+                    ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-lg shadow-cyan-500/10'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                <span className="text-[10px] font-mono text-slate-500">[{idx + 1}]</span>
+                <span>{WEAPONS[w].name}</span>
+              </button>
+            ))}
           </div>
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={startReload}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Reload [R]</span>
-            </button>
-
-            <button
-              onClick={() => setChatOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer"
-            >
-              <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
-              <span>Chat [Enter]</span>
-            </button>
-
-            <button
-              onClick={() => setScoreboardOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer"
-            >
-              <Trophy className="w-3.5 h-3.5 text-amber-400" />
-              <span>Scoreboard [Tab]</span>
-            </button>
+          {/* Quick HUD Info */}
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-slate-400">
+              Ammo: <strong className="text-white font-mono">{stateRef.current.localPlayer.ammo}/{stateRef.current.localPlayer.maxAmmo}</strong>
+            </span>
+            <span className="text-slate-500">•</span>
+            <span className="text-slate-400">
+              Press <kbd className="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-cyan-400">SPACE</kbd> to Dash
+            </span>
+            <span className="text-slate-500">•</span>
+            <span className="text-slate-400">
+              Score: <strong className="text-amber-400 font-mono">{stateRef.current.localPlayer.score}</strong>
+            </span>
           </div>
         </div>
 
-        {/* In-Game Chat Box Modal Overlay */}
+        {/* In-game Floating Chat Toggle */}
+        <div className="absolute bottom-16 left-4 z-30">
+          <button
+            onClick={() => setChatOpen((prev) => !prev)}
+            className="p-2.5 bg-slate-900/90 hover:bg-slate-850 text-slate-300 rounded-xl border border-slate-800 transition shadow-lg cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+          >
+            <MessageSquare className="w-4 h-4 text-cyan-400" /> Chat [T]
+          </button>
+        </div>
+
+        {/* In-game Chat Box */}
         {chatOpen && (
-          <div className="absolute bottom-16 left-4 z-30 w-80 bg-slate-950/95 border border-slate-800 rounded-2xl p-3 shadow-2xl backdrop-blur-md">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
-                <MessageSquare className="w-3.5 h-3.5" /> Arena Live Chat
-              </span>
-              <button onClick={() => setChatOpen(false)} className="text-slate-400 hover:text-white text-xs">✕</button>
-            </div>
-            <div className="max-h-36 overflow-y-auto flex flex-col gap-1 text-[11px] mb-2 pr-1">
-              {chatLog.slice(-6).map((msg, i) => (
-                <div key={i} className="leading-tight">
-                  <span className={msg.isOwner ? 'text-amber-400 font-bold' : 'text-cyan-400 font-bold'}>
-                    {msg.sender}:
+          <div className="absolute bottom-28 left-4 w-72 bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-2xl p-3 shadow-2xl flex flex-col gap-2 z-30">
+            <div className="max-h-40 overflow-y-auto flex flex-col gap-1.5 text-xs pr-1">
+              {chatLog.map((m, idx) => (
+                <div key={idx} className="bg-slate-900/70 p-1.5 rounded-lg border border-slate-850">
+                  <span className={m.isHost ? 'text-amber-300 font-bold' : 'text-cyan-400 font-bold'}>
+                    {m.isHost && '👑 '}{m.sender}:
                   </span>{' '}
-                  <span className="text-slate-200">{msg.text}</span>
+                  <span className="text-slate-200">{m.text}</span>
                 </div>
               ))}
             </div>
-            <form onSubmit={handleSendChat} className="flex items-center gap-2">
+
+            <form onSubmit={handleSendChat} className="flex gap-1.5">
               <input
                 type="text"
-                autoFocus
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Type message to arena..."
+                placeholder="Type in-game..."
                 className="flex-1 bg-slate-900 border border-slate-800 text-xs text-white px-2.5 py-1.5 rounded-xl outline-none focus:border-cyan-500"
               />
               <button
@@ -2084,7 +2443,11 @@ export const OriginalMultiplayerPage: React.FC = () => {
                   <div className="col-span-3 text-right">Score</div>
                 </div>
 
-                {[stateRef.current.localPlayer, ...stateRef.current.bots]
+                {[
+                  stateRef.current.localPlayer,
+                  ...stateRef.current.bots,
+                  ...Array.from(stateRef.current.remotePlayers.values())
+                ]
                   .sort((a, b) => b.score - a.score)
                   .map((fighter, rank) => (
                     <div
@@ -2112,6 +2475,106 @@ export const OriginalMultiplayerPage: React.FC = () => {
                       </div>
                     </div>
                   ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Share Room Modal Overlay */}
+        {shareModalOpen && (
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col gap-5">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400">
+                    <Share2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Share Room & Play Together</h3>
+                    <p className="text-xs text-slate-400">Send this link to friends on any phone, PC, or tablet</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShareModalOpen(false)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Room Code Badge */}
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Room Code</span>
+                  <span className="text-lg font-mono font-black text-cyan-400">{currentRoom?.code || 'CYBER-1'}</span>
+                </div>
+                <button
+                  onClick={() => handleCopyCodeOnly(currentRoom?.code || 'CYBER-1')}
+                  className="flex items-center gap-1.5 bg-slate-850 hover:bg-slate-800 text-slate-200 text-xs font-bold px-3.5 py-2 rounded-xl transition cursor-pointer"
+                >
+                  {copiedKind === 'code' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKind === 'code' ? 'Code Copied!' : 'Copy Code'}</span>
+                </button>
+              </div>
+
+              {/* Option 1: Online Public Link */}
+              <div className="bg-gradient-to-r from-purple-950/40 to-slate-950 border border-purple-500/40 rounded-2xl p-4 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-purple-400" /> Online Link (Recommended for Friends)
+                  </span>
+                  <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-mono">
+                    Any Device Worldwide
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Send this link on Discord, WhatsApp, or SMS. Your friend can open it on their phone, laptop, or PC and join right away!
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={getInviteUrl(currentRoom?.code || 'CYBER-1', 'online')}
+                    className="flex-1 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 px-3 py-2 rounded-xl font-mono truncate"
+                  />
+                  <button
+                    onClick={() => handleCopyLink(currentRoom?.code || 'CYBER-1', 'online')}
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shrink-0 flex items-center gap-1"
+                  >
+                    {copiedKind === 'online' ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKind === 'online' ? 'Copied!' : 'Copy Online Link'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 2: Localhost Link */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Laptop className="w-4 h-4 text-cyan-400" /> Local Link (Same Machine Testing)
+                  </span>
+                  <span className="text-[10px] bg-slate-850 text-slate-400 px-2 py-0.5 rounded font-mono">
+                    This PC Only
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Use this link if opening a second window or tab on this exact same computer.
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={getInviteUrl(currentRoom?.code || 'CYBER-1', 'local')}
+                    className="flex-1 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 px-3 py-2 rounded-xl font-mono truncate"
+                  />
+                  <button
+                    onClick={() => handleCopyLink(currentRoom?.code || 'CYBER-1', 'local')}
+                    className="bg-slate-850 hover:bg-slate-800 text-cyan-300 font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shrink-0 flex items-center gap-1"
+                  >
+                    {copiedKind === 'local' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKind === 'local' ? 'Copied!' : 'Copy Local'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
